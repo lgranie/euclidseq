@@ -1,86 +1,156 @@
 /*
 * Author:       Laurent Granié
-* Copyright:    (C) 2014 Laurent Granié
-* Licence:      GNU General Public Licence version 3
-*/
+ * Copyright:    (C) 2014 Laurent Granié
+ * Licence:      GNU General Public Licence version 3
+ */
 #include <TimerOne.h>
 #include <SRIO.h>
 #include <LiquidCrystal.h>
 
-//Mode define
-#define MODE_PLAY     0
-#define MODE_CONFIG_1 1
-#define MODE_CONFIG_2 2
-
-#define NB_MODE     3
-uint8_t mode = MODE_PLAY;
-
-boolean play_pattern=0;
-
-#define SERIAL_MODE_SERIAL 9600
-#define SERIAL_MODE_MIDI   31250
-#define SERIAL_MODE_USB    115200
-uint32_t serial_mode = SERIAL_MODE_MIDI;
-
 #define NB_BANK 4
-uint8_t bank = 0;
-uint8_t inst = 0;
+#define NB_INST 4
+byte bank = 0;
+byte inst = 0;
+boolean inst_changed = false;
+
+#define NB_PARM 4
+
+//Mode define
+#define MODE_CONFIG_1 0
+#define MODE_PLAY     1
+
+#define NB_MODE     2
+
+byte mode = MODE_CONFIG_1;
+boolean play_pattern = 0;
+
+#define SERIAL_MODE_SERIAL 0
+#define SERIAL_MODE_MIDI   1
+#define SERIAL_MODE_USB    2
+byte serial_mode = SERIAL_MODE_USB;
+
+prog_char SERIAL_MODE_LABEL_01[] PROGMEM = "SER";
+prog_char SERIAL_MODE_LABEL_02[] PROGMEM = "MID";
+prog_char SERIAL_MODE_LABEL_03[] PROGMEM = "USB";
+PROGMEM const char *SERIAL_MODE_LABELS[] = {
+  SERIAL_MODE_LABEL_01, SERIAL_MODE_LABEL_02, SERIAL_MODE_LABEL_03
+};
+const uint32_t SERIAL_MODE_VALUES[] = {
+  9600, 31250, 115200
+};
+
+const byte COLS_ORDER[NB_INST] = {
+  1, 0, 3, 2
+};
 
 #define RYTHM_MODE_POLY 0
 #define RYTHM_MODE_SOLO 1
-uint8_t rythm_mode[NB_BANK][4];
+byte rythm_mode[NB_BANK][NB_INST];
+
+prog_char RYTHM_MODE_00[] PROGMEM = "PL";
+prog_char RYTHM_MODE_01[] PROGMEM = "SL";
+PROGMEM const char *RYTHM_MODE_LABELS[] = {
+  RYTHM_MODE_00, RYTHM_MODE_01
+};
 
 LiquidCrystal lcd(2,3,4,5,6,7);
 
-#define LCD_MODE_PLAY_00 0
-#define LCD_MODE_PLAY_01 1
-#define LCD_MODE_PLAY_02 2
-#define LCD_MODE_PLAY_03 3
-#define LCD_MODE_PLAY_04 4
+boolean lcd_mode_bitmap = false;
 
-uint8_t lcd_mode = MODE_PLAY;
-uint8_t lcd_mode_play = LCD_MODE_PLAY_00;
-uint8_t old_lcd_mode_play = LCD_MODE_PLAY_00;
+#define BITMAP_PULS_01 0
+#define BITMAP_PULS_02 1
+#define BITMAP_PULS_03 2
+#define BITMAP_PULS_04 3
+#define BITMAP_ROLL_01 4
+#define BITMAP_ROLL_02 5
+#define BITMAP_ROLL_03 6
+#define BITMAP_ROLL_04 7
 
-boolean bitmap_mode = false;
-uint8_t bitmap_mode_step = 0;
-boolean pot_change  = true;
+byte BITMAP_CHAR_PULS_01[8]        = {
+  B00000, B00000, B00000, B00000, B00000, B00100, B00100, B11111};
+byte BITMAP_CHAR_PULS_02[8]        = {
+  B00000, B00000, B00000, B00100, B00100, B00100, B00100, B11111};
+byte BITMAP_CHAR_PULS_03[8]        = {
+  B00000, B00100, B00100, B00100, B00100, B00100, B00100, B11111};
+byte BITMAP_CHAR_PULS_04[8]        = {
+  B00100, B00100, B00100, B00100, B00100, B00100, B00100, B11111};
+  
+byte BITMAP_CHAR_ROLL_01[8]         = {
+  B00000, B00000, B00000, B00000, B00000, B01010, B01010, B11111};
+byte BITMAP_CHAR_ROLL_02[8]  = {
+  B00000, B00000, B00000, B01010, B01010, B01010, B01010, B11111};
+byte BITMAP_CHAR_ROLL_03[8]  = {
+  B00000, B01010, B01010, B01010, B01010, B01010, B01010, B11111};
+byte BITMAP_CHAR_ROLL_04[8]  = {
+  B01010, B01010, B01010, B01010, B01010, B01010, B01010, B11111};
 
 //-----MIDI-----//            
-uint8_t bpm = 120;//Default BPM
+byte bpm = 120;//Default BPM
 unsigned int old_clock_time = 0;
-boolean midi_sync = 0; //0 master sync  1 slave sync  Default MasterBPM
-uint8_t midi_channel=1;//Default Midi Channel
+boolean midi_master = 1; //1 master sync  0 slave sync  Default MasterBPM
 
 //Midi message define
 #define MIDI_START 0xfa
 #define MIDI_STOP  0xfc
 #define MIDI_CLOCK 0xf8
-const char* midi_note_labels[] = {"C%d", "C%d#", "D%d", "D%d#", "E%d", "F%d", "F%d#", "G%d", "G%d#", "A%d", "A%d#", "B%d"};
-char midi_note_label[3];
+
+prog_char MIDI_NOTE_LABEL_01[] PROGMEM   = "C%d";
+prog_char MIDI_NOTE_LABEL_02[] PROGMEM   = "C%d#";
+prog_char MIDI_NOTE_LABEL_03[] PROGMEM   = "D%d";
+prog_char MIDI_NOTE_LABEL_04[] PROGMEM   = "D%d#";
+prog_char MIDI_NOTE_LABEL_05[] PROGMEM   = "E%d";
+prog_char MIDI_NOTE_LABEL_06[] PROGMEM   = "F%d";
+prog_char MIDI_NOTE_LABEL_07[] PROGMEM   = "F%d#";
+prog_char MIDI_NOTE_LABEL_08[] PROGMEM   = "G%d";
+prog_char MIDI_NOTE_LABEL_09[] PROGMEM   = "G%d#";
+prog_char MIDI_NOTE_LABEL_10[] PROGMEM   = "A%d";
+prog_char MIDI_NOTE_LABEL_11[] PROGMEM   = "A%d#";
+prog_char MIDI_NOTE_LABEL_12[] PROGMEM   = "B%d";
+
+PROGMEM const char *MIDI_NOTE_LABELS[] = {
+  MIDI_NOTE_LABEL_01, MIDI_NOTE_LABEL_02, MIDI_NOTE_LABEL_03, MIDI_NOTE_LABEL_04, MIDI_NOTE_LABEL_05, MIDI_NOTE_LABEL_06,
+  MIDI_NOTE_LABEL_07, MIDI_NOTE_LABEL_08, MIDI_NOTE_LABEL_09, MIDI_NOTE_LABEL_10, MIDI_NOTE_LABEL_11, MIDI_NOTE_LABEL_12
+};
 
 //Time in microsecond of the callback fuction
 uint16_t timer_time = 5000;
+int16_t count_ppqn[NB_BANK][NB_INST];
+int16_t old_count_ppqn[NB_BANK][NB_INST];
 
-uint8_t count_ppqn[NB_BANK][4];
-uint8_t count_step[NB_BANK][4];
-uint8_t track_step[NB_BANK][4];
-uint8_t track_last_step[NB_BANK][4];
-uint8_t track_puls[NB_BANK][4];
-int8_t  track_offs[NB_BANK][4];
-uint8_t track_swing[NB_BANK][4];
+byte count_step[NB_BANK][NB_INST];
+byte count_puls[NB_BANK][NB_INST];
+byte track_last_step[NB_BANK][NB_INST];
+boolean track_step_chng[NB_BANK][NB_INST];
 
-boolean noteOn[NB_BANK][4];
+byte track_step[NB_BANK][NB_INST];
+byte track_puls[NB_BANK][NB_INST];
+byte track_offs[NB_BANK][NB_INST];
+byte track_roll[NB_BANK][NB_INST];
+byte track_roff[NB_BANK][NB_INST];
+byte track_acnt[NB_BANK][NB_INST];
+byte track_aoff[NB_BANK][NB_INST];
+byte track_swing[NB_BANK][NB_INST];
 
-uint8_t midi_note[NB_BANK][4] = {{36, 37, 38, 39}, {40,41,42,43}, {44,45,46,47}, {48,49,50,51}};
-uint8_t midi_velo[NB_BANK][4];
+boolean noteOn[NB_BANK][NB_INST];
 
-boolean ***beat_holder;
+byte  midi_note[NB_BANK][NB_INST] = {
+  {
+    36, 37, 38, 39                  }
+  , {
+    40,41,42,43                  }
+}; //, {44,45,46,47}, {48,49,50,51}};
+byte  midi_chnl[NB_BANK][NB_INST];
+byte* midi_velo[NB_BANK][NB_INST];
 
-uint8_t track_scale[NB_BANK][4];
+boolean *beat_holder[NB_BANK][NB_INST];
+boolean *roll_holder[NB_BANK][NB_INST];
+boolean *acnt_holder[NB_BANK][NB_INST];
+
+byte track_scale[NB_BANK][NB_INST];
 
 // Licklogic
-uint8_t valuePot[NB_BANK][4][4]; 
+byte valuePot[5][NB_BANK][NB_INST][NB_PARM] = {
+  0}; 
 
 // Buttons et LED
 #define BUTTON_RED         7
@@ -92,30 +162,72 @@ uint8_t valuePot[NB_BANK][4][4];
 #define BUTTON_BLACK_03    1
 #define BUTTON_BLACK_04    0
 
-#define LED_RED         7
-#define LED_BLACK       6
-#define LED_WHITE_LEFT  5
-#define LED_WHITE_RIGHT 4
-#define LED_BLACK_01    3
-#define LED_BLACK_02    2
-#define LED_BLACK_03    1
-#define LED_BLACK_04    0
+boolean valueBut[8];
+boolean one_but_press = false;
+boolean one_pot_changed = false;
 
-uint8_t LED_INST[4] = {LED_BLACK_01, LED_BLACK_02, LED_BLACK_03, LED_BLACK_04};
+#define LED_RED         BUTTON_RED
+#define LED_BLACK       BUTTON_BLACK
+#define LED_WHITE_LEFT  BUTTON_WHITE_LEFT
+#define LED_WHITE_RIGHT BUTTON_WHITE_RIGHT
+#define LED_BLACK_01    BUTTON_BLACK_01
+#define LED_BLACK_02    BUTTON_BLACK_02
+#define LED_BLACK_03    BUTTON_BLACK_03
+#define LED_BLACK_04    BUTTON_BLACK_04
 
-int i, j;
+const byte LED_inst[NB_INST] = {
+  LED_BLACK_01, LED_BLACK_02, LED_BLACK_03, LED_BLACK_04
+};
+
+prog_char LABEL_NO[]  PROGMEM = "NO";
+prog_char LABEL_YES[] PROGMEM = "YES";
+PROGMEM const char *YESNO_LABELS[] = {
+  LABEL_NO, LABEL_YES
+};
+
+#define LCD_MODE_PLAY_00 4
+#define LCD_MODE_PLAY_01 BUTTON_BLACK_01
+#define LCD_MODE_PLAY_02 BUTTON_BLACK_02
+#define LCD_MODE_PLAY_03 BUTTON_BLACK_03
+#define LCD_MODE_PLAY_04 BUTTON_BLACK_04
+
+const prog_char LCD_MODE_LABEL_00[] PROGMEM = " SYC BPM BUS BNK";
+const prog_char LCD_PLAY_LABEL_00[] PROGMEM = "%u%u STP PLS OFF  ";
+const prog_char LCD_PLAY_LABEL_01[] PROGMEM = "%u%u     ROL OFF  ";
+const prog_char LCD_PLAY_LABEL_02[] PROGMEM = "%u%u VEL ACT OFF  ";
+const prog_char LCD_PLAY_LABEL_03[] PROGMEM = "%u%u SG RT CN NT  ";
+const prog_char LCD_PLAY_LABEL_04[] PROGMEM = "%u%u ARP TYP PAR  ";
+PROGMEM const char *LCD_MODE_LABELS[] = {
+  LCD_MODE_LABEL_00, LCD_PLAY_LABEL_04, LCD_PLAY_LABEL_03,
+  LCD_PLAY_LABEL_02, LCD_PLAY_LABEL_01, LCD_PLAY_LABEL_00
+};
+
+const char _clear_buffer[4] = {
+  '\0  '};
+
+byte lcd_mode = MODE_PLAY;
+byte lcd_mode_play = LCD_MODE_PLAY_00;
+boolean lcd_mode_play_changed = true;
 
 //--------------------------------------------SETUP----------------------------------------------//
 void setup() {
   // Attach callback function to Timer1
   Timer1.attachInterrupt(Count_PPQN);
 
+  //initialize special character
   lcd.begin(16,2);
+  lcd.createChar(BITMAP_PULS_01, BITMAP_CHAR_PULS_01);
+  lcd.createChar(BITMAP_PULS_02, BITMAP_CHAR_PULS_02);
+  lcd.createChar(BITMAP_PULS_03, BITMAP_CHAR_PULS_03);
+  lcd.createChar(BITMAP_PULS_04, BITMAP_CHAR_PULS_04);
+  lcd.createChar(BITMAP_ROLL_01, BITMAP_CHAR_ROLL_01);
+  lcd.createChar(BITMAP_ROLL_02, BITMAP_CHAR_ROLL_02);
+  lcd.createChar(BITMAP_ROLL_03, BITMAP_CHAR_ROLL_03);
+  lcd.createChar(BITMAP_ROLL_04, BITMAP_CHAR_ROLL_04);
   lcd.clear();
-  lcd.print("  EUCLIDE SEQ   ");
-  
-  Serial.begin(serial_mode);
-  
+
+  Serial.begin(SERIAL_MODE_VALUES[serial_mode]);
+
   // Init Potentiometres
   pinMode(8, OUTPUT);    // clock Pin du compteur CD4520
   pinMode(12, INPUT);    // Pin temoin d'initialisation du compteur binaire CD4520
@@ -132,31 +244,41 @@ void setup() {
   }
   while (digitalRead (12) ==LOW);
   pinMode(12, OUTPUT);// ceci afin déviter les conflits avec la bibliothèque SRIO
-  
+
   // Init Buttons
   SR.Initialize();
   SR.Led_All_On();
+
   // Init default value
-  beat_holder = (boolean***) malloc(NB_BANK * sizeof * beat_holder);
-  for(i = 0; i < 4; i++) {
-    beat_holder[i] = (boolean**) malloc(4 * sizeof * beat_holder[i]);
-    
-    for(j = 0; j < 4; j++) {
-      rythm_mode [i][j] = RYTHM_MODE_POLY;
-      count_ppqn [i][j] = -1;
-      count_step [i][j] = 0;
-      track_step [i][j] = 0;
-      track_puls [i][j] = 0;
-      track_offs [i][j] = 0;
-      track_scale[i][j] = 6;
-      track_swing[i][j] = 0;
-      track_last_step[i][j] = 0;
-      midi_velo  [i][j] = 100;
-      noteOn     [i][j] = false;
-      valuePot   [i][j][0] = 0;
-      valuePot   [i][j][1] = 0;
-      valuePot   [i][j][2] = 0;
-      valuePot   [i][j][3] = 0;
+  for(byte _i = 0; _i < NB_BANK; _i++) {
+    for(byte _j = 0; _j < NB_INST; _j++) {
+      beat_holder[_i][_j] = NULL;
+      roll_holder[_i][_j] = NULL;
+      acnt_holder[_i][_j] = NULL;
+
+      rythm_mode [_i][_j] = RYTHM_MODE_POLY;
+      count_ppqn [_i][_j] = -1;
+      old_count_ppqn [_i][_j] = -1;
+      count_step [_i][_j] = 0;
+      count_puls [_i][_j] = 0;
+
+      track_step [_i][_j] = 0;
+      track_puls [_i][_j] = 0;
+      track_offs [_i][_j] = 0;
+      track_roll [_i][_j] = 0;
+      track_roff [_i][_j] = 0;
+      track_acnt [_i][_j] = 0;
+      track_aoff [_i][_j] = 0;
+
+      track_scale[_i][_j] = 6;
+      track_swing[_i][_j] = 0;
+
+      track_last_step[_i][_j] = 0;
+      track_step_chng[_i][_j] = false;
+
+      midi_velo  [_i][_j] = NULL;
+      midi_chnl  [_i][_j] = 1;
+      noteOn     [_i][_j] = false;
     }
   }
   delay(500);
@@ -167,390 +289,569 @@ void setup() {
 //--------------------------------------------LOOP-----------------------------------------------//
 void loop() {
   Timer1.initialize(timer_time);
-  
+
   checkButValues();
-  
   checkPotValues();
-  
+
   updateMidi();
-  
-  updateLeds();
-  
   updateLcd();
-
-}
-
-void checkPotValues() {
-  int cols[4] = {1,0,3,2};
-  
-  uint8_t current_pot_value, diff;
-  for (int ci=0; ci < 4; ci++) {
-    int c = cols[ci];
-    for (int l=0; l< 4; l++) {
-      digitalWrite(8,LOW);
-      uint32_t data = analogRead(c / 2) >> 2;//convert 10bits 0->1024 to 8bits 0->255
-      current_pot_value = map(data,6,247,0,255);// map to right value 0,127 due to the bad ADC and bad power stability
-      current_pot_value = max(current_pot_value,0);  
-      current_pot_value = constrain(current_pot_value,0,255);
-      digitalWrite(8,HIGH);
- 
-      if(mode == MODE_PLAY) {
-        if(SR.Button_Pin_Read(BUTTON_BLACK_01)) {
-          lcd_mode_play = LCD_MODE_PLAY_01;
-          bitmap_mode = false;
-          switch(l) {
-            case 0 :
-              break;
-            case 1 :
-              current_pot_value = current_pot_value * 127 / 255;
-              diff = abs(current_pot_value - midi_note[bank][c]);
-              if(diff == 1) {
-                inst = c;
-                midi_note[bank][inst] = current_pot_value;
-                pot_change = true;
-              }
-              break;
-            case 2 :
-              current_pot_value = current_pot_value * track_scale[bank][c] / 255;
-              diff = abs(current_pot_value - track_swing[bank][c]);
-              if(diff == 1) {
-                inst = c;
-                track_swing[bank][inst] = current_pot_value;
-                pot_change = true;
-              }
-              break;
-            case 3 :
-              current_pot_value = current_pot_value / 255; // 0->1
-              if (rythm_mode[bank][c] != current_pot_value) {
-                inst = c;
-                rythm_mode[bank][inst] = current_pot_value;
-                
-                // Update scale
-                if(rythm_mode[bank][inst] == RYTHM_MODE_SOLO && track_step[bank][inst] != 0) {
-                  track_scale[bank][inst] = (96 / track_step[bank][inst]) * 2; // 96 = 24 ppqn x 4 noires = nb ppqm / bar
-                } else {
-                  track_scale[bank][inst] = 6;
-                }
-                pot_change = true;
-              }
-              break;
-            }
-            continue;
-          } else {
-            lcd_mode_play = LCD_MODE_PLAY_00;
-            diff = abs(current_pot_value - valuePot[bank][c][l]);
-            if (diff > 0 && diff < 8) {
-              inst = c;
-              valuePot[bank][inst][l] = current_pot_value;
-              
-              switch(l) {
-                case 0 :
-                  break;
-                case 1 :
-                  current_pot_value = current_pot_value * 32 / 255;
-                  if(track_step[bank][inst] == current_pot_value) {
-                    break;
-                  } else {
-                    track_step[bank][inst] = current_pot_value;
-                    pot_change = true;
-                  }
-                  
-                  if(rythm_mode[bank][inst] == RYTHM_MODE_SOLO && track_step[bank][inst] != 0) {
-                    track_scale[bank][inst] = (96 / track_step[bank][inst]) * 2; // 96 = 24 ppqn x 4 noires = nb ppqm / bar
-                  } else {
-                    track_scale[bank][inst] = 6;
-                  }
-                  
-                  track_puls[bank][inst] = valuePot[bank][inst][2] * track_step[bank][inst] / 255;
-                  track_offs[bank][inst] = valuePot[bank][inst][3] * track_step[bank][inst] / 255;
-                  break;
-                case 2 :
-                  current_pot_value = current_pot_value * track_step[bank][inst] / 255;
-                  if(track_puls[bank][inst] == current_pot_value) {
-                    break;
-                  } else {
-                    track_puls[bank][inst] = current_pot_value;
-                    pot_change = true;
-                  }
-                
-                  track_offs[bank][inst] = valuePot[bank][inst][3] * track_step[bank][inst] / 255;
-                  break;
-                case 3 :
-                  current_pot_value = current_pot_value * track_step[bank][inst] / 255;
-                  if(track_offs[bank][inst] == current_pot_value) {
-                    break;
-                  } else {
-                    track_offs[bank][inst] = current_pot_value;
-                    pot_change = true;
-                  }
-                  
-                  track_offs[bank][inst] = current_pot_value * track_step[bank][inst] / 255; 
-                  break;
-              }
-            euclid(bank, inst);
-          }
-          continue;
-        }
-      }
-    } 
-  }
 }
 
 void checkButValues() {
-  if(SR.Button_Pin_Read(BUTTON_RED)) {
-    play_pattern = !play_pattern;
-    if(play_pattern) {
-      Serial.write(MIDI_START);
-    } else {
-      Serial.write(MIDI_STOP);
-      bitmap_mode_step = 0;
-    }
-    delay(100);
-    return;
-  }
- 
+  one_but_press = false;
+  lcd_mode_play_changed = false;
+
   if(mode == MODE_PLAY) {
-    if(SR.Button_Pin_Read(BUTTON_BLACK)) {
-      bitmap_mode = !bitmap_mode;
-      pot_change = true;
-      delay(100);
-    }
-  }
- 
-  if(mode == MODE_CONFIG_1) {
-    if(SR.Button_Pin_Read(BUTTON_BLACK_01)) {
-      midi_sync = !midi_sync;
-      delay(100);
+    if(checkButPress(BUTTON_BLACK_01)) {
+      update_lcd_mode_play(LCD_MODE_PLAY_01);
       return;
     }
-    if(SR.Button_Pin_Read(BUTTON_BLACK_02)) {
-      if(serial_mode == SERIAL_MODE_USB)
-        serial_mode = SERIAL_MODE_MIDI;
-      else if(serial_mode == SERIAL_MODE_MIDI)
-        serial_mode = SERIAL_MODE_SERIAL;
-      else 
-        serial_mode = SERIAL_MODE_USB;
-      
-      Serial.begin(serial_mode);
-      delay(100);
+    if(checkButPress(BUTTON_BLACK_02)) {
+      update_lcd_mode_play(LCD_MODE_PLAY_02);
       return;
-      
     }
-    if(SR.Button_Pin_Read(BUTTON_BLACK_03)) {
-      if(SR.Button_Pin_Read(BUTTON_WHITE_LEFT)) {
-        bank--;
-        bank = (bank + NB_BANK) % NB_BANK;
-        delay(100);
-        return;
-      }
-      if(SR.Button_Pin_Read(BUTTON_WHITE_RIGHT)) {
-        bank++;
-        bank = bank % NB_BANK;
-        delay(100);
-        return;
-      }
+    if(checkButPress(BUTTON_BLACK_03)) {
+      update_lcd_mode_play(LCD_MODE_PLAY_03);
+      return;
+    }
+    if(checkButPress(BUTTON_BLACK_04)) {
+      update_lcd_mode_play(LCD_MODE_PLAY_04);
+      return;
     }
     
-    if(SR.Button_Pin_Read(BUTTON_BLACK_04)) {
-      if(SR.Button_Pin_Read(BUTTON_WHITE_LEFT)) {
-        if(midi_channel > 0)
-          midi_channel--;
+    if(lcd_mode_play == LCD_MODE_PLAY_02 && !play_pattern) {
+      if(checkButPress(BUTTON_WHITE_LEFT)) {
+        count_step[bank][inst] = (count_step[bank][inst] + track_step[bank][inst] - 1) % track_step[bank][inst];
+        track_step_chng[bank][inst] = true;
+        return;
       }
-      if(SR.Button_Pin_Read(BUTTON_WHITE_RIGHT)) {
-        midi_channel++;
-      }
-      delay(100);
-      return;
-    }
-  }
-  
-  if(mode == MODE_CONFIG_2) {
-    if(SR.Button_Pin_Read(BUTTON_BLACK_04)) {
-      if(!midi_sync) {
-        if(SR.Button_Pin_Read(BUTTON_WHITE_LEFT)) {
-          if(!midi_sync) {
-            bpm--;
-          }
-          delay(100);
-          return;
-        }
-        if(SR.Button_Pin_Read(BUTTON_WHITE_RIGHT)) {
-          if(!midi_sync) {
-            bpm++;
-          }
-          delay(100);
-          return;
-        }
+      if(checkButPress(BUTTON_WHITE_RIGHT)) {
+        count_step[bank][inst] = (count_step[bank][inst] + 1) % track_step[bank][inst];
+        track_step_chng[bank][inst] = true;
+        return;
       }
       return;
     }
   }
-  
+
+  if(mode == MODE_CONFIG_1) {
+    if(checkButPress(BUTTON_BLACK_01)) {
+      midi_master = !midi_master;
+      return;
+    }
+
+    checkButPress(BUTTON_BLACK_02);
+    if(midi_master && valueBut[BUTTON_BLACK_02]) {
+      if(checkButPress(BUTTON_WHITE_LEFT)) {
+        bpm--;
+        return;
+      }
+
+      if(checkButPress(BUTTON_WHITE_RIGHT)) {
+        bpm++;
+        return;
+      }
+    }
+
+    if(checkButPress(BUTTON_BLACK_03)) {
+      serial_mode = (serial_mode + 1) % 3;
+      Serial.begin(SERIAL_MODE_VALUES[serial_mode]);
+      return;
+    } 
+
+    if(checkButPress(BUTTON_BLACK_04)) {
+      bank = (bank + 1) % NB_BANK;
+      return;
+    } 
+  }
+
+  if(checkButPress(BUTTON_RED)) {
+    if(midi_master) {
+      play_pattern = !play_pattern;
+      SR.Led_Pin_Write(LED_RED, play_pattern);
+      if(!play_pattern) {
+        for(byte _i = 0; _i < NB_BANK; _i++) {
+          for(byte _j = 0; _j < NB_INST; _j++) {
+            count_ppqn[_i][_j] = -1;
+            count_step[_i][_j] = 0;
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if(checkButPress(BUTTON_BLACK)) {
+    lcd_mode_bitmap = !lcd_mode_bitmap;
+    lcd_mode_play_changed = true;
+    SR.Led_Pin_Write(LED_BLACK, byte(lcd_mode_bitmap));
+    return;
+  }
+
   // Navigation
-  if(SR.Button_Pin_Read(BUTTON_WHITE_LEFT)) {
-    mode--;
-    mode = (mode + NB_MODE) % NB_MODE;
-    // Refresh play screen
-    pot_change = mode == MODE_PLAY;
-    delay(100);
+  if(checkButPress(BUTTON_WHITE_LEFT)) {
+    mode = (mode + NB_MODE - 1) % NB_MODE;
+    return;
   }
-  
-  if(SR.Button_Pin_Read(BUTTON_WHITE_RIGHT)) {
-    mode++;
-    mode = mode % NB_MODE;
-    // Refresh play screen
-    pot_change = mode == MODE_PLAY;
-    delay(100);
+
+  if(checkButPress(BUTTON_WHITE_RIGHT)) {
+    mode = (mode + 1) % NB_MODE;
+    return;
   }
-  
 }
 
-void updateLeds() {  
-  if(play_pattern) {
-    SR.Led_Pin_Write(LED_RED, 1);
-  } else {
-     SR.Led_Pin_Write(LED_RED, 0); 
+boolean checkButPress(byte _button) {
+  if(SR.Button_Pin_Read(_button)) {
+    if(!valueBut[_button]) {
+      valueBut[_button] = true;
+      one_but_press = true;
+      return true;
+    }
   } 
-  if(bitmap_mode) {
-    SR.Led_Pin_Write(LED_BLACK, 1);
-  } else {
-     SR.Led_Pin_Write(LED_BLACK, 0); 
+  else {
+    valueBut[_button] = false;
   }
+  return false;
+}
+
+void update_lcd_mode_play(byte _new_lcd_mode_play) {
+  lcd_mode_play_changed = true;
+  if(_new_lcd_mode_play == lcd_mode_play) {
+    SR.Led_Pin_Write(lcd_mode_play, 0);
+    lcd_mode_play = LCD_MODE_PLAY_00;
+  } 
+  else {
+    SR.Led_Pin_Write(lcd_mode_play, 0);
+    SR.Led_Pin_Write(_new_lcd_mode_play, 1);
+    lcd_mode_play = _new_lcd_mode_play;
+  }
+}
+
+void checkPotValues() {
+  one_pot_changed = false;
+  inst_changed = false;
+  byte _pot_value, _diff, old_track_step;
+
+  for(byte _i = 0; _i < NB_INST; _i++) {
+    byte _inst = COLS_ORDER[_i];
+
+    for(byte _j = 0; _j < NB_PARM; _j++) {
+      digitalWrite(8,LOW);
+      byte data = analogRead(_inst / 2) >> 2;//convert 10bits 0->1024 to 8bits 0->255
+      _pot_value = map(data,6,247,0,255);// map to right value 0,255 due to the bad ADC and bad power stability
+      _pot_value = max(_pot_value, 0);
+      _pot_value = constrain(_pot_value, 0, 255);
+      digitalWrite(8,HIGH);
+
+      _diff = abs(_pot_value - valuePot[lcd_mode_play][bank][_inst][_j]);
+      if (_diff > 0 && _diff < 12) {
+        // Change current instrument (ie. pot column)
+        if(inst != _inst) {
+          inst = _inst;
+          inst_changed = true;
+        }
+        mode = MODE_PLAY;
+        valuePot[lcd_mode_play][bank][inst][_j] = _pot_value;
+        switch(lcd_mode_play) {
+        case LCD_MODE_PLAY_00:
+          switch(_j) {
+          case 0 :
+            break;
+          case 1 : 
+            old_track_step = track_step[bank][inst];
+            if(checkValuePotChange(&track_step[bank][inst], _pot_value, 32, 255)) {
+              // Change scale
+              if((rythm_mode[bank][inst] == RYTHM_MODE_SOLO) && (track_step[bank][inst] != 0)) { 
+                track_scale[bank][inst] = (96 / track_step[bank][inst]) * 2; // 96 = 24 ppqn x 4 noires = nb ppqm / bar
+              } 
+              else {
+                track_scale[bank][inst] = 6;
+              }
+
+              // Change midi_velo
+              if(track_step[bank][inst] != 0) {
+                byte *tmp_midi_velo = (byte*) malloc(track_step[bank][inst] * sizeof(byte));
+
+                for(int _k = 0; _k < track_step[bank][inst]; _k++) {
+                  if(old_track_step != 0 && _k < old_track_step) {
+                    tmp_midi_velo[_k] = midi_velo[bank][inst][_k];
+                  } 
+                  else {
+                    tmp_midi_velo[_k] = 1;
+                  }
+                }  
+                free(midi_velo[bank][inst]);
+                midi_velo[bank][inst] = tmp_midi_velo;
+              } 
+              else {
+                free(midi_velo[bank][inst]);
+                midi_velo[bank][inst] = NULL;
+              }
+
+              track_puls[bank][inst] = valuePot[LCD_MODE_PLAY_00][bank][inst][2] * track_step[bank][inst] / 255;
+              track_offs[bank][inst] = valuePot[LCD_MODE_PLAY_00][bank][inst][3] * track_step[bank][inst] / 255;
+              track_roll[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_roff[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][3] * track_puls[bank][inst] / 255;
+              track_acnt[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_aoff[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][3] * track_puls[bank][inst] / 255;
+            }
+            break;
+          case 2 :
+            if(checkValuePotChange(&track_puls[bank][inst], _pot_value, track_step[bank][inst], 255)) {
+              track_offs[bank][inst] = valuePot[LCD_MODE_PLAY_00][bank][inst][3] * track_step[bank][inst] / 255;
+              track_roll[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_roff[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][3] * track_puls[bank][inst] / 255;
+              track_acnt[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_aoff[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][3] * track_puls[bank][inst] / 255;
+            }
+            break;
+          case 3 :
+            if(checkValuePotChange(&track_offs[bank][inst], _pot_value, track_step[bank][inst], 255)) {
+              track_roll[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_roff[bank][inst] = valuePot[LCD_MODE_PLAY_01][bank][inst][3] * track_puls[bank][inst] / 255;
+              track_acnt[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][2] * track_puls[bank][inst] / 255;
+              track_aoff[bank][inst] = valuePot[LCD_MODE_PLAY_02][bank][inst][3] * track_puls[bank][inst] / 255;
+            }
+            break;
+          }
+
+          if(one_pot_changed) {
+            euclid(track_step[bank][inst], track_puls[bank][inst], track_offs[bank][inst], &beat_holder[bank][inst]);
+            euclid(track_puls[bank][inst], track_roll[bank][inst], track_roff[bank][inst], &roll_holder[bank][inst]);
+            euclid(track_puls[bank][inst], track_acnt[bank][inst], track_aoff[bank][inst], &acnt_holder[bank][inst]);
+            continue;
+          }
+          break;
+        case LCD_MODE_PLAY_01 :
+          switch(_j) {
+          case 0 :
+            break;
+          case 1 :
+            break;
+          case 2 :
+            if(checkValuePotChange(&track_roll[bank][inst], _pot_value, track_puls[bank][inst], 255)) {
+              euclid(track_puls[bank][inst], track_roll[bank][inst], track_roff[bank][inst], &roll_holder[bank][inst]);
+              continue;
+            }
+            break;
+          case 3 :
+            if(checkValuePotChange(&track_roff[bank][inst], _pot_value, track_puls[bank][inst], 255)) {
+              euclid(track_puls[bank][inst], track_roll[bank][inst], track_roff[bank][inst], &roll_holder[bank][inst]);
+              continue;
+            }
+            break;
+          }
+          break;
+        case LCD_MODE_PLAY_02:
+          switch(_j) {
+          case 0 :
+            if(!play_pattern) {
+              if(checkValuePotChange(&midi_velo[bank][inst][count_step[bank][inst]], _pot_value, 4, 255)) {
+                continue;
+              }
+            }
+            break;
+          case 1 :
+            break;
+          case 2 :
+            if(checkValuePotChange(&track_acnt[bank][inst], _pot_value, track_puls[bank][inst], 255)) {
+              euclid(track_puls[bank][inst], track_acnt[bank][inst], track_aoff[bank][inst], &acnt_holder[bank][inst]);
+              continue;
+            }
+            break;
+          case 3 :
+            if(checkValuePotChange(&track_aoff[bank][inst], _pot_value, track_puls[bank][inst], 255)) {
+              euclid(track_puls[bank][inst], track_acnt[bank][inst], track_aoff[bank][inst], &acnt_holder[bank][inst]);
+              continue;
+            }
+            break;
+          }
+          break;
+        case LCD_MODE_PLAY_03:
+          switch(_j) {
+          case 0 :
+            if(checkValuePotChange(&track_swing[bank][inst], _pot_value, track_scale[bank][inst], 255)) {
+              continue;
+            }
+            break;
+          case 1 :
+            _pot_value = _pot_value * 64 / 255;
+            if(_pot_value > 31 && 
+              rythm_mode[bank][inst] == RYTHM_MODE_POLY) {
+              one_pot_changed = true;
+              rythm_mode[bank][inst] = RYTHM_MODE_SOLO; // == 1
+            } 
+            else if(_pot_value < 32 && 
+              rythm_mode[bank][inst] == RYTHM_MODE_SOLO) {
+              one_pot_changed = true;
+              rythm_mode[bank][inst] = RYTHM_MODE_POLY; // == 0
+            }
+
+            if(one_pot_changed) {
+              // Update scale
+              if(rythm_mode[bank][inst] == RYTHM_MODE_SOLO && track_step[bank][inst] != 0) {
+                track_scale[bank][inst] = (96 / track_step[bank][inst]) * 2; // 96 = 24 ppqn x 4 noires = nb ppqm / bar
+              } 
+              else {
+                track_scale[bank][inst] = 6;
+              }
+              continue;
+            }
+            break;
+          case 2 :
+            if(checkValuePotChange(&midi_chnl[bank][inst], _pot_value, 12, 255)) {
+              continue;
+            }
+            break;
+          case 3 :
+            if(checkValuePotChange(&midi_note[bank][inst], _pot_value, 127, 255)) {
+              continue;
+            }
+            break;
+          }
+          break;
+        case LCD_MODE_PLAY_04:
+          switch(_j) {
+          case 0 :
+            break;
+          case 1 :
+            break;
+          case 2 :
+            break;
+          case 3 :
+            break;
+          }
+          break;
+        }
+      }
+    }
+  } 
+}
+
+byte checkValuePotChange(byte *value, byte _value_pot, byte _precision, byte _plage) {
+  byte _pot_value = _value_pot * _precision / _plage;
+  if(*value != _pot_value) {
+    *value = _pot_value;
+    one_pot_changed = true;
+    return true;
+  }
+  return false;
 }
 
 void updateLcd() {
-  if(mode == MODE_PLAY) {
-    if(lcd_mode != mode) {
-      lcd_mode = MODE_PLAY;
-      lcd.clear();
-    }
-    
-    if(bitmap_mode) {
-      if( (play_pattern && (bitmap_mode_step != count_step[bank][inst])) 
-      || (bitmap_mode_step == 0 && pot_change)) {
-        pot_change = false;
-        bitmap_mode_step = count_step[bank][inst];
-        lcd.clear();
-        lcd.setCursor(0,1);
-        for(i = 0; i <  track_step[bank][inst]; i++) {
-          lcd.setCursor(i % 16, i / 16);
-          if(i == count_step[bank][inst] && play_pattern) {
-            lcd.print((char) 255);
-          } else if(beat_holder[bank][inst][i]) {
-            lcd.print((char) 124);
-          } else {
-            lcd.print((char) 95);
-          }
-        }
-      }
-    } else {
-      if(pot_change || old_lcd_mode_play != lcd_mode_play) {
-        lcd.clear();
-        pot_change = false;
-        old_lcd_mode_play = lcd_mode_play;
-      
-        if(lcd_mode_play == LCD_MODE_PLAY_01) {
-          lcd.setCursor(0,0);
-          lcd.print("NOT SWG RYT");
-          lcd.setCursor(0, 1);
-          sprintf(midi_note_label, midi_note_labels[midi_note[bank][inst] % 12], midi_note[bank][inst] / 12);
-          lcd.print(midi_note_label);
-          lcd.setCursor(4,1);
-          lcd.print(track_swing[bank][inst]);
-          lcd.setCursor(8,1);
-          if(rythm_mode[bank][inst] == RYTHM_MODE_POLY) 
-            lcd.print("POL ");
-          else
-            lcd.print("SOL ");
-        } else {
-          lcd.setCursor(0,0);
-          lcd.print("B   STP PLS OFF ");
-          lcd.setCursor(2,0);
-          lcd.print(bank,DEC);
-          lcd.setCursor(0,1);
-          lcd.print("I   ");
-          lcd.setCursor(2,1);
-          lcd.print(inst,DEC);
-          lcd.setCursor(4,1);
-          lcd.print(track_step[bank][inst],DEC);
-          lcd.setCursor(8,1);
-          lcd.print(track_puls[bank][inst],DEC);
-          lcd.setCursor(12,1);
-          lcd.print((int) track_offs[bank][inst],DEC);
-        }
-      }
-    }
+  boolean _lcd_mode_changed = false;
+  
+  if(lcd_mode != mode) {
+    lcd_mode = mode;
+    _lcd_mode_changed = true;
+    lcd_mode_play_changed = true;
   }
-  
-  if(mode == MODE_CONFIG_1) {
-    if(lcd_mode != mode) {
-      lcd_mode = MODE_CONFIG_1;
+
+  // MODE BITMAP
+  if(lcd_mode_bitmap) {
+    if(_lcd_mode_changed || lcd_mode_play_changed
+      || (play_pattern  && track_step_chng[bank][inst]) 
+      || (!play_pattern && one_pot_changed)) {
       lcd.clear();
-    }
-    lcd.setCursor(0,0);
-    lcd.print("SYC BUS BNK CHN ");
-    lcd.setCursor(0,1);
-    if(midi_sync)
-      lcd.print("YES ");
-    else
-      lcd.print("NO  ");
-    lcd.setCursor(4,1);
-    if(serial_mode == SERIAL_MODE_USB)
-      lcd.print("USB ");
-    else if(serial_mode == SERIAL_MODE_MIDI)
-      lcd.print("MID ");
-    else
-      lcd.print("SER ");
-    
-    lcd.setCursor(8,1);
-    lcd.print(bank, DEC);
-    
-    lcd.setCursor(12,1);
-    lcd.print(midi_channel, DEC);
-    
-    return;
-  }
-  
-  if(mode == MODE_CONFIG_2) {
-    if(lcd_mode != mode) {
-      lcd_mode = MODE_CONFIG_2;
-      lcd.clear();
-    }
-    lcd.setCursor(0,0);
-    lcd.print("             BPM ");
-    lcd.setCursor(12,1);
-    lcd.print(bpm, DEC);
-    
-    return;
-  }
-  
-}
-  
-void updateMidi() {
-  if(play_pattern) { 
-    for(int inst = 0; inst < 4; inst++) {
-      if(track_puls[bank][inst] > 0) {
-        if((track_last_step[bank][inst] != count_step[bank][inst])) {
-            Send_NoteOFF(midi_note[bank][inst]);  
-            SR.Led_Pin_Write(LED_INST[inst], 0);
-            noteOn[bank][inst] = false;
-            track_last_step[bank][inst] = count_step[bank][inst];
-        }
+      lcd.setCursor(0,1);
+
+      byte _pulse_step = 0;
+      for(byte _i = 0; _i <  track_step[bank][inst]; _i++) {
+        lcd.setCursor(_i % 16, _i / 16);
         
-        if (beat_holder[bank][inst][count_step[bank][inst]]) {
-          if(!noteOn[bank][inst]) {
-            Send_NoteON(midi_note[bank][inst], midi_velo[bank][inst]);  
-            SR.Led_Pin_Write(LED_INST[inst], 1);
-            noteOn[bank][inst] = true;
-          } else {
-            //Send_NoteCONT(midi_note[bank][inst]);
+        if(_i == count_step[bank][inst] && play_pattern) {
+          lcd.write(char(219));
+          if(!beat_holder[bank][inst][_i]) {
+            continue;
           }
-        } else {
-          if(noteOn[bank][inst]) {
-            Send_NoteOFF(midi_note[bank][inst]);  
-            SR.Led_Pin_Write(LED_INST[inst], 0);
-            noteOn[bank][inst] = false;
+        }
+        if(beat_holder[bank][inst][_i]) {
+          if(_i == count_step[bank][inst] && play_pattern) {
+            _pulse_step++;
+            continue;
           }
+          
+          byte _step_char = 0;
+          // Apply velocity and accent
+          _step_char += midi_velo[bank][inst][_i];
+          if(acnt_holder[bank][inst] != NULL && acnt_holder[bank][inst][_pulse_step]) {
+            _step_char++;
+          }
+          _step_char = min(_step_char, 3);
+          
+          // Apply roll
+          if(roll_holder[bank][inst] != NULL && roll_holder[bank][inst][_pulse_step]) {
+            _step_char += 4;
+          }
+          
+          lcd.write(byte(_step_char));
+          _pulse_step++;
+        }
+        // Write '_' step empty
+        lcd.write(char(95));
+      }
+    }
+    return;
+  } 
+
+  // MODE FIRST LINE
+  char _line_buf[16] = {'\0'};
+  if(_lcd_mode_changed || lcd_mode_play_changed || inst_changed) {
+    if(lcd_mode == MODE_CONFIG_1) {
+      sprintf_P(_line_buf, (PGM_P) pgm_read_word(&(LCD_MODE_LABELS[lcd_mode])),
+        bank, inst);
+    } else if (mode == MODE_PLAY) {
+      sprintf_P(_line_buf, (PGM_P) pgm_read_word(&(LCD_MODE_LABELS[lcd_mode_play + 1])),
+        bank, inst);
+    }
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print(_line_buf);
+  }
+
+  char _label[4] = {'\0'};
+  if(lcd_mode == MODE_PLAY) {
+    //MODE PLAY VALUES LINES
+    if(one_pot_changed || lcd_mode_play_changed) {
+      if(lcd_mode_play == LCD_MODE_PLAY_01) {
+        sprintf_P(_label, PSTR("%3u"), track_roll[bank][inst]); 
+        lcd.setCursor(7, 1);
+        lcd.print(_label);
+        
+        sprintf_P(_label, PSTR("%3u"), track_roff[bank][inst]); 
+        lcd.setCursor(11, 1);
+        lcd.print(_label);
+      } 
+      else if(lcd_mode_play == LCD_MODE_PLAY_02) {
+        sprintf_P(_label, PSTR("%3u"), track_acnt[bank][inst]); 
+        lcd.setCursor(7, 1);
+        lcd.print(_label);
+        
+        sprintf_P(_label, PSTR("%3u"), track_aoff[bank][inst]); 
+        lcd.setCursor(11, 1);
+        lcd.print(_label);
+      } 
+      else if(lcd_mode_play == LCD_MODE_PLAY_03) {
+        sprintf_P(_label, PSTR("%2u"), track_swing[bank][inst]); 
+        lcd.setCursor(3, 1);
+        lcd.print(_label);
+
+        strcpy_P(_label, (PGM_P) pgm_read_word(&(RYTHM_MODE_LABELS[rythm_mode[bank][inst]])));
+        lcd.setCursor(6, 1);
+        lcd.print(_label);
+
+        sprintf_P(_label, PSTR("%2u"), midi_chnl[bank][inst]);
+        lcd.setCursor(9, 1);
+        lcd.print(_label);
+
+        char _label2[4] = {'\0'};
+        sprintf_P(_label, 
+        (PGM_P) pgm_read_word(&(MIDI_NOTE_LABELS[midi_note[bank][inst] % 12])),
+        midi_note[bank][inst] / 12);
+        sprintf_P(_label2, PSTR("%-4s"), _label);
+        lcd.setCursor(12, 1);
+        lcd.print(_label2);
+      } 
+      else if(lcd_mode_play == LCD_MODE_PLAY_04) {
+
+      } 
+      else {
+        sprintf_P(_label, PSTR("%3u"), track_step[bank][inst]);
+        lcd.setCursor(3, 1);
+        lcd.print(_label);
+        
+        sprintf_P(_label, PSTR("%3u"), track_puls[bank][inst]);
+        lcd.setCursor(7, 1);
+        lcd.print(_label);
+        
+        sprintf_P(_label, PSTR("%3u"), track_offs[bank][inst]);
+        lcd.setCursor(11, 1);
+        lcd.print(_label);
+      }
+    }
+      
+    if(track_step_chng[bank][inst] || _lcd_mode_changed || lcd_mode_play_changed || one_pot_changed) {
+      if(lcd_mode_play == LCD_MODE_PLAY_02) {
+        sprintf_P(_label, PSTR("%3u"), min(midi_velo[bank][inst][count_step[bank][inst]] * 32, 127));
+        lcd.setCursor(3, 1);  
+        lcd.print(_label);
+      }
+
+      lcd.setCursor(0, 1);
+      sprintf_P(_label, PSTR("%2u"), count_step[bank][inst] + 1);
+      lcd.print(_label);
+    }
+    return;
+  }
+
+  if(lcd_mode == MODE_CONFIG_1) {
+    if(_lcd_mode_changed || one_but_press) {
+      strcpy_P(_line_buf, (char*) pgm_read_word(&(LCD_MODE_LABELS[lcd_mode])));
+      lcd.setCursor(0,0);
+      lcd.print(_line_buf);
+
+      char _ser[4], _yesno[4];
+      strcpy_P(_yesno, (PGM_P) pgm_read_word(&(YESNO_LABELS[midi_master])));
+      strcpy_P(_ser, (PGM_P) pgm_read_word(&(SERIAL_MODE_LABELS[serial_mode])));
+      sprintf_P(_line_buf, PSTR("%4s%4u%4s%4u"),
+      _yesno, bpm, _ser, bank
+        );
+  
+      lcd.setCursor(0,1);
+      lcd.print(_line_buf);
+    }
+    return;
+  }
+}
+
+void updateMidi() {
+  if(one_but_press && valueBut[BUTTON_RED]) {
+    if(play_pattern) {
+      Serial.write(MIDI_START);
+    } 
+    else {
+      Serial.write(MIDI_STOP);
+      for(byte _i = 0; _i < NB_BANK; _i++) {
+        for(byte _j = 0; _j < NB_INST; _j++) {
+          Send_NoteOFF(_i, _j);
+        }
+      }
+    }
+  }
+
+  if(play_pattern) {
+    for(byte _i = 0; _i < NB_BANK; _i++) {
+      for(byte _j = 0; _j < NB_INST; _j++) {
+        if(track_puls[_i][_j] > 0 && old_count_ppqn[_i][_j] != count_ppqn[_i][_j]) {
+          old_count_ppqn[_i][_j] = count_ppqn[_i][_j];
+          // New step
+          if(track_step_chng[_i][_j]) {
+            Send_NoteOFF(_i, _j);
+            if(count_step[_i][_j] == 0) {
+              count_puls[_i][_j] = 0;
+            }
+          }
+          // Apply roll
+          else if(noteOn[_i][_j] 
+            && (roll_holder[_i][_j] != NULL && roll_holder[_i][_j][count_puls[_i][_j] - 1])
+            && (count_ppqn[_i][_j] % track_scale[_i][_j] == track_scale[_i][_j] / 2)) {
+            if(Send_NoteOFF(_i, _j)) {
+              count_puls[_i][_j]--;
+            }
+          }
+
+          if (beat_holder[_i][_j][count_step[_i][_j]]) {
+            if(!noteOn[_i][_j]) {
+              byte _midi_velo = midi_velo[_i][_j][count_step[_i][_j]];
+              if(acnt_holder[_i][_j] != NULL && acnt_holder[_i][_j][count_puls[_i][_j]]) {
+                _midi_velo++;
+              }
+              _midi_velo = min(_midi_velo + 1, 4);
+              if(Send_NoteON(_i, _j, min(_midi_velo * 32, 127))) { 
+                count_puls[_i][_j]++;
+              }
+            }
+          } 
         }
       }
     }
@@ -561,162 +862,186 @@ void updateMidi() {
 //This function is call by the timer depending Sync mode and BPM//
 //////////////////////////////////////////////////////////////////
 void Count_PPQN() {
-//-----------------Sync SLAVE-------------------//  
-  if(midi_sync) {
+  //-----------------Sync SLAVE-------------------//  
+  if(!midi_master) {
     timer_time=5000;
     if(Serial.available() > 0) {
       byte data = Serial.read();
       if(data == MIDI_START) {
-          play_pattern = 1;
-          for(i = 0; i < NB_BANK; i++) {
-            for(j = 0; j < 4; j++) {
-              count_ppqn[i][j] = -1;
-            }
+        play_pattern = true;
+        for(byte _i = 0; _i < NB_BANK; _i++) {
+          for(byte _j = 0; _j < NB_INST; _j++) {
+            count_ppqn[_i][_j] = -1;
           }
+        }
       }
-      
+
       else if(data == MIDI_STOP ) {
-        play_pattern = 0;
-        bitmap_mode_step = 0;
-        for(i = 0; i < NB_BANK; i++) {
-          for(j = 0; j < 4; j++) {
-            count_step[i][j] = 0;
-            count_ppqn[i][j] = -1;
+        play_pattern = false;
+        for(byte _i = 0; _i < NB_BANK; _i++) {
+          for(byte _j = 0; _j < NB_INST; _j++) {
+            count_step[_i][_j] = 0;
+            count_ppqn[_i][_j] = -1;
           }
         }
       }
       else if(data == MIDI_CLOCK && play_pattern) {
         int time = millis();
-        bpm = (time - old_clock_time) / 24 * 60000;
+        bpm = (byte) (time - old_clock_time) / 24 * 60000;
         old_clock_time = time;
-        for(i = 0; i < NB_BANK; i++) {
-          for(j = 0; j < 4; j++) {
-            count_ppqn[i][j]++;
-            int current_track_step = 0;
-          
-            // Apply swing
-            // Delay the second 16th note within each 8th note.
-            // ie. delay all the even-numbered 16th notes within the beat (2, 4, 6, 8, etc.)
-            current_track_step = count_ppqn[i][j] / track_scale[i][j]; //stretch
-            if(current_track_step % 2 == 0) {
-              current_track_step = (count_ppqn[i][j] - track_swing[i][j]) / track_scale[i][j];
-            }
-            
-            count_step[i][j] = current_track_step;   
-            if(count_ppqn[i][j] >= (track_step[i][j] * track_scale[i][j]) - 1) {
-              count_ppqn[i][j] = -1;
-            }
-          }
-        }
+        update_all_count_ppqn();
       }
     }
   }
-  
+
   //-----------------Sync MASTER-------------------//
-  if(!midi_sync){
+  if(midi_master){
     timer_time=2500000/bpm;
-    Serial.write(MIDI_CLOCK);
-    if(!play_pattern) {
-      for(i = 0; i < NB_BANK; i++) {
-        for(j = 0; j < 4; j++) {
-          count_ppqn[i][j] = -1;
-          count_step[i][j] = 0;
+    //Serial.write(MIDI_CLOCK);
+    if(play_pattern) {  
+      update_all_count_ppqn();
+    }
+  }
+}
+
+void update_all_count_ppqn() { 
+  for(byte _i = 0; _i < NB_BANK; _i++) {
+    for(byte _j = 0; _j < NB_INST; _j++) {
+      if(track_puls[_i][_j] > 0) {
+        count_ppqn[_i][_j]++;
+        byte current_track_step = 0;
+
+        // Apply swing
+        // Delay the second 16th note within each 8th note.
+        // ie. delay all the even-numbered 16th notes within the beat (2, 4, 6, 8, etc.)
+        if(track_swing[_i][_j] != 0 && current_track_step % 2 == 0) {
+          current_track_step = (count_ppqn[_i][_j] - track_swing[_i][_j]) / track_scale[_i][_j];
+        } 
+        else {
+          current_track_step = count_ppqn[_i][_j] / track_scale[_i][_j]; //stretch
         }
-      }
-    } else {   
-      for(i = 0; i < NB_BANK; i++) {
-        for(j = 0; j < 4; j++) {
-          count_ppqn[i][j]++;
-          int current_track_step = 0;
-          
-          // Apply swing
-          // Delay the second 16th note within each 8th note.
-          // ie. delay all the even-numbered 16th notes within the beat (2, 4, 6, 8, etc.)
-          current_track_step = count_ppqn[i][j] / track_scale[i][j]; //stretch
-          if(current_track_step % 2 == 0) {
-            current_track_step = (count_ppqn[i][j] - track_swing[i][j]) / track_scale[i][j];
+
+        if(count_step[_i][_j] != current_track_step) {
+          if(count_ppqn[_i][_j] >= (track_step[_i][_j] * track_scale[_i][_j]) - 1) {
+            count_ppqn[_i][_j] = -1;
+            current_track_step = 0;
           }
-          
-          count_step[i][j] = current_track_step;   
-          if(count_ppqn[i][j] >= (track_step[i][j] * track_scale[i][j]) - 1) {
-            count_ppqn[i][j] = -1;
-          }
+          count_step[_i][_j] = current_track_step;
+        }
+
+        if(track_last_step[_i][_j] != count_step[_i][_j]) {
+          track_step_chng[_i][_j] = true;
+          track_last_step[_i][_j] = count_step[_i][_j];
+        } 
+        else {
+          track_step_chng[_i][_j] = false;
         }
       }
     }
   }
 }
-
 // Euclid calculation function
-uint8_t pos;
-int8_t remainder[32];
-int8_t count[32];
-  
-void euclid(int8_t bank, int8_t inst) {
-    // Init beat_holder
-    free(beat_holder[bank][inst]);
-    if(track_step[bank][inst] > 0) {
-      beat_holder[bank][inst] = (boolean *) malloc(track_step[bank][inst]);
-      for(i = 0; i < track_step[bank][inst]; i++) {
-        beat_holder[bank][inst][i] = false;
-      }
-    } else  
-      beat_holder[bank][inst] = 0UL;
-    
-    if(track_puls[bank][inst] == 0) {
-      return;
+uint8_t eucl_pos;
+int8_t eucl_remainder[32];
+int8_t eucl_count[32];
+
+void euclid(byte _steps, byte _pulse, byte _offs, boolean* *_tab) {
+  // Init tab
+  free(*_tab);
+  if(_steps > 0) {
+    *_tab = (boolean*) malloc(_steps);
+    for(byte _i = 0; _i < _steps; _i++) {
+      (*_tab)[_i] = false;
     }
-    
-    pos = 0;
-    
-    int8_t divisor = track_step[bank][inst] - track_puls[bank][inst];
-    remainder[0] = track_puls[bank][inst]; 
-    int8_t level = 0; 
-    int8_t cycleLength = 1; 
-    int8_t remLength = 1;
-    do { 
-      count[level] = divisor / remainder[level]; 
-      remainder[level+1] = divisor % remainder[level]; 
-      divisor = remainder[level]; 
-      int8_t newLength = (cycleLength * count[level]) + remLength; 
-      remLength = cycleLength; 
-      cycleLength = newLength; 
-      level = level + 1;
-    }while(remainder[level] > 1);
-    
-    count[level] = divisor; 
-    if(remainder[level] > 0)
-      cycleLength = (cycleLength * count[level]) + remLength;
-    build(level, bank, inst);
+  } 
+  else {
+    *_tab = NULL;
   }
 
-  void build(int8_t level, int8_t bank, int8_t inst) {
-    int newPos = pos++;
-    // Apply offset
-    newPos += track_offs[bank][inst] + 1;
-    newPos = newPos % track_step[bank][inst];  
-    
-    if(level == -1) {
-      beat_holder[bank][inst][newPos] = false;
-    }else if(level == -2){
-      beat_holder[bank][inst][newPos] = true; 
-    }else{
-      pos--;
-      for(int8_t i=0; i < count[level]; i++)
-	build(level-1, bank, inst); 
-      if(remainder[level] != 0)
-	build(level-2, bank, inst); 
-    }
+  if(_pulse == 0) {
+    return;
   }
 
-void Send_NoteON(byte data, uint8_t velo) {
-  Serial.write (144+midi_channel-1);//Note ON on selected channel 
-  Serial.write (data);
-  Serial.write (velo);
+  eucl_pos = 0;
+  eucl_remainder[0] = _pulse; 
+
+  int8_t _divisor = (int8_t) _steps - _pulse;
+  int8_t _level = 0; 
+  int8_t _cycleLength = 1; 
+  int8_t _remLength = 1;
+  do { 
+    eucl_count[_level] = _divisor / eucl_remainder[_level]; 
+    eucl_remainder[_level+1] = _divisor % eucl_remainder[_level]; 
+    _divisor = eucl_remainder[_level];
+
+    int8_t _newLength = (_cycleLength * eucl_count[_level]) + _remLength; 
+    _remLength = _cycleLength; 
+    _cycleLength = _newLength; 
+    _level++;
+  }
+  while(eucl_remainder[_level] > 1);
+
+  eucl_count[_level] = _divisor; 
+  if(eucl_remainder[_level] > 0) {
+    _cycleLength = (_cycleLength * eucl_count[_level]) + _remLength;
+  }
+  build(_level, _steps, _offs, *_tab);
 }
 
-void Send_NoteOFF(byte data){
-  Serial.write (128+midi_channel-1);//Note OFF on selected channel
-  Serial.write (data);
-  Serial.write (0x01);//velocite 0
+void build(int8_t _level, byte _steps, byte _offs, boolean* _tab) {
+  uint8_t _newPos = eucl_pos++;
+
+  // Apply offset
+  _newPos = (uint8_t) (_newPos + _offs + 1)  % _steps;  
+
+  if(_level == -1) {
+    _tab[_newPos] = false;
+  } 
+  else if(_level == -2) {
+    _tab[_newPos] = true; 
+  } 
+  else {
+    eucl_pos--;
+    for(byte _p=0; _p < eucl_count[_level]; _p++) {
+      build(_level-1, _steps, _offs, _tab); 
+    }
+
+    if(eucl_remainder[_level] != 0) {
+      build(_level-2, _steps, _offs, _tab); 
+    }
+  }
 }
+
+boolean Send_NoteON(byte _i, byte _j, byte velo) {
+  if(!noteOn[_i][_j]) {
+    Serial.write (144 + midi_chnl[_i][_j] - 1);//Note ON on selected channel 
+    Serial.write (midi_note[_i][_j]);
+    Serial.write (velo);
+
+    if(_i == bank) {
+      SR.Led_Pin_Write(LED_inst[_j], 1);
+    }
+    noteOn[_i][_j] = true;
+    return true;
+  }
+  return false;
+}
+
+boolean Send_NoteOFF(byte _i, byte _j) {
+  if(noteOn[_i][_j]) {
+    Serial.write (128 + midi_chnl[_i][_j] - 1);//Note OFF on selected channel
+    Serial.write (midi_note[_i][_j]);
+    Serial.write (0x01);//velocite 0
+
+    if(_i == bank) {
+      SR.Led_Pin_Write(LED_inst[_j], 0);
+    }
+    noteOn[_i][_j] = false;
+    return true;
+  }
+  return false;
+}
+
+
+
+
