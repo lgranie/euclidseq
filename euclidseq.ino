@@ -3,17 +3,19 @@
  * Copyright:    (C) 2014 Laurent Granié
  * Licence:      GNU General Public Licence version 3
  */
+#include <avr/pgmspace.h>
+
 #include <TimerOne.h>
 #include <SmoozPotMUX.h>
 #include <SRIO.h>
 #include <LiquidCrystal.h>
 
 /* a=target variable, b=bit number to act upon 0-n */
-#define BIT_SET(a,b) (a[b/8] |= 1 << (b%8))
-#define BIT_CLR(a,b) (a[b/8] &= ~(1 << (b%8)))
-#define BIT_FLP(a,b) (a[b/8] ^= 1 << (b%8))
-#define BIT_CHK(a,b) (a[b/8] & (1 << (b%8)))
-#define BIT_BYT(a,b) !!(a[b/8] & (1 << (b%8)))
+#define BIT_SET(a,b) (a[(b>>3)] |= 1 << (b&7))  // b/8 == i>>3, b%8 == b&7
+#define BIT_CLR(a,b) (a[(b>>3)] &= ~(1 << (b&7)))
+#define BIT_FLP(a,b) (a[(b>>3)] ^= 1 << (b&7))
+#define BIT_CHK(a,b) (a[(b>>3)] & (1 << (b&7)))
+#define BIT_BYT(a,b) !!(a[(b>>3)] & (1 << (b&7)))
 
 #define NB_PARM  8
 #define NB_INSTS 16 // NB_BANK x NB_INST
@@ -27,12 +29,6 @@
 #define POT_CHANGE      5
 byte state = B00000101;
 
-#define LCD_MODE_BITMAP 0
-#define LCD_PLAY_CHANGE 1
-#define LCD_DRAW_BITMAP 2
-#define LCD_MODE_CHANGE 3
-byte lcd_state = B00000010;
-
 byte inst = 0;
 
 //Mode define
@@ -42,104 +38,70 @@ byte inst = 0;
 
 byte mode = MODE_PLAY;
 
+// Serial Mode
+const char SERIAL_MODE_LABELS[2][4] PROGMEM = { 
+ { "Mid" }, { "Usb" }
+};
+const uint32_t SERIAL_MODE_VALUES[2] PROGMEM = {
+  31250, 115200
+};
 #define SERIAL_MODE_MIDI   0
 #define SERIAL_MODE_USB    1
 byte serial_mode = SERIAL_MODE_USB;
 
-const prog_char SERIAL_MODE_LABEL_01[] PROGMEM = "MID";
-const prog_char SERIAL_MODE_LABEL_02[] PROGMEM = "USB";
-const char *SERIAL_MODE_LABELS[] PROGMEM = {
-  SERIAL_MODE_LABEL_01, SERIAL_MODE_LABEL_02
+// Rythm Mode
+const char RYTHM_MODE_LABELS[2][4] PROGMEM = {
+  { "Pol" }, { "Sol" }
 };
-const prog_uint32_t SERIAL_MODE_VALUES[] PROGMEM = {
-  31250, 115200
-};
-
 #define RYTHM_MODE_POLY 0
 #define RYTHM_MODE_SOLO 1
 byte rythm_mode[NB_INSTS];
 
-const prog_char RYTHM_MODE_00[] PROGMEM = "Pol";
-const prog_char RYTHM_MODE_01[] PROGMEM = "Sol";
-const char *RYTHM_MODE_LABELS[] PROGMEM = {
-  RYTHM_MODE_00, RYTHM_MODE_01
-};
-
+// Lcd
 LiquidCrystal lcd(2,3,4,5,6,7);
 
-const prog_char BITMAP_PULS_01[8] PROGMEM = {
-  B00000, B00000, B00100, B00100, B00100, B00100, B11111, B00000};
-const prog_char BITMAP_PULS_02[8] PROGMEM = {
-  B00100, B00100, B00100, B00100, B00100, B00100, B11111, B00000};
-const prog_char BITMAP_ROLL_01[8] PROGMEM = {
-  B00000, B00000, B01010, B01010, B01010, B01010, B11111, B00000};
-const prog_char BITMAP_ROLL_02[8] PROGMEM = {
-  B01010, B01010, B01010, B01010, B01010, B01010, B11111, B00000};
-const prog_char *BITMAP_CHARS[] PROGMEM = {
-  BITMAP_PULS_01, BITMAP_PULS_02,
-  BITMAP_ROLL_01, BITMAP_ROLL_02
+#define LCD_MODE_BITMAP 0
+#define LCD_PLAY_CHANGE 1
+#define LCD_DRAW_BITMAP 2
+#define LCD_MODE_CHANGE 3
+byte lcd_state = B00000010;
+
+const byte BITMAP_CHARS[4][8] PROGMEM = {
+  {B00000, B00000, B00100, B00100, B00100, B00100, B11111, B00000}, 
+  {B00100, B00100, B00100, B00100, B00100, B00100, B11111, B00000},
+  {B00000, B00000, B01010, B01010, B01010, B01010, B11111, B00000}, 
+  {B01010, B01010, B01010, B01010, B01010, B01010, B11111, B00000}
 };
 
 
 /////////////////////////////////////////////////////////
 // ARPEGGIO
 /////////////////////////////////////////////////////////
-#define MAJOR      0
-#define MINOR      1
-#define IONIAN     2
-#define DORIAN     3
-#define PHRYGIAN   4
-#define LYDIAN     5
-#define MIXOLYDIAN 6
-#define AEOLIAN    7
-#define BLUES      8
-#define OFF        9
-const prog_uchar ARP_SCALE_MAJOR[7]      PROGMEM = {0, 2, 4, 5, 7, 9, 11};
-const prog_uchar ARP_SCALE_MINOR[7]      PROGMEM = {0, 2, 3, 5, 7, 8, 10};
-const prog_uchar ARP_SCALE_IONIAN[7]     PROGMEM = {0, 2, 4, 5, 7, 9, 11};
-const prog_uchar ARP_SCALE_DORIAN[7]     PROGMEM = {0, 1, 3, 5, 7, 8, 10};
-const prog_uchar ARP_SCALE_PHRYGIAN[7]   PROGMEM = {0, 2, 4, 6, 7, 9, 11};
-const prog_uchar ARP_SCALE_LYDIAN[7]     PROGMEM = {0, 2, 4, 5, 7, 9, 10};
-const prog_uchar ARP_SCALE_MIXOLYDIAN[7] PROGMEM = {0, 2, 3, 5, 7, 8, 10};
-const prog_uchar ARP_SCALE_AEOLIAN[7]    PROGMEM = {0, 1, 3, 5, 6, 8, 10};
-const prog_uchar ARP_SCALE_BLUES[7]      PROGMEM = {0, 2, 3, 4, 7, 9, 12};
-const prog_uchar *ARP_SCALES[] PROGMEM = {
-  ARP_SCALE_MAJOR,  ARP_SCALE_MINOR,    ARP_SCALE_IONIAN,
-  ARP_SCALE_DORIAN, ARP_SCALE_PHRYGIAN, ARP_SCALE_LYDIAN, 
-  ARP_SCALE_MIXOLYDIAN, ARP_SCALE_AEOLIAN, ARP_SCALE_BLUES
+const char ARP_SCALES[9][7] PROGMEM = {
+  {0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 8, 10}, {0, 2, 4, 5, 7, 9, 11},
+  {0, 1, 3, 5, 7, 8, 10}, {0, 2, 4, 6, 7, 9, 11}, {0, 2, 4, 5, 7, 9, 10}, 
+  {0, 2, 3, 5, 7, 8, 10}, {0, 1, 3, 5, 6, 8, 10}, {0, 2, 3, 4, 7, 9, 12}
 };
 
-const prog_char ARP_SCALE_LABEL_00[] PROGMEM = "Maj";
-const prog_char ARP_SCALE_LABEL_01[] PROGMEM = "Min";
-const prog_char ARP_SCALE_LABEL_02[] PROGMEM = "Ion";
-const prog_char ARP_SCALE_LABEL_03[] PROGMEM = "Dor";
-const prog_char ARP_SCALE_LABEL_04[] PROGMEM = "Phr";
-const prog_char ARP_SCALE_LABEL_05[] PROGMEM = "Lyd";
-const prog_char ARP_SCALE_LABEL_06[] PROGMEM = "Mix";
-const prog_char ARP_SCALE_LABEL_07[] PROGMEM = "Aeo";
-const prog_char ARP_SCALE_LABEL_08[] PROGMEM = "Blu";
-const prog_char ARP_SCALE_LABEL_09[] PROGMEM = "Off";
-const prog_char *ARP_SCALE_LABELS[] PROGMEM = {
-  ARP_SCALE_LABEL_00, ARP_SCALE_LABEL_01, ARP_SCALE_LABEL_02,
-  ARP_SCALE_LABEL_03, ARP_SCALE_LABEL_04, ARP_SCALE_LABEL_05,
-  ARP_SCALE_LABEL_06, ARP_SCALE_LABEL_07, ARP_SCALE_LABEL_08,
-  ARP_SCALE_LABEL_09
+const char ARP_SCALE_LABELS[10][4] PROGMEM = { 
+  {"Maj"}, {"Min"}, {"Ion"}, 
+  {"Dor"}, {"Phr"}, {"Lyd"}, 
+  {"Mix"}, {"Aeo"}, {"Blu"}, 
+  {"Off"}
 };
+
+#define OFF 9
 
 #define ARP_TYPE_FULL 0
 #define ARP_TYPE_7TH  1
-const prog_uchar ARP_TYPE_LABEL_FULL[] PROGMEM = "Ful";
-const prog_uchar ARP_TYPE_LABEL_7TH[]  PROGMEM = "7th";
-const prog_uchar *ARP_TYPE_LABELS[] PROGMEM = {
-  ARP_TYPE_LABEL_FULL, ARP_TYPE_LABEL_7TH
+const char ARP_TYPE_LABELS[3][4] PROGMEM = {
+  {"Ful"}, {"7th"}
 };
 
-#define ARP_ARP_UP   0
-#define ARP_ARP_DOWN 1
-const prog_uchar ARP_ARP_LABEL_UP[]  PROGMEM = "Up";
-const prog_uchar ARP_ARP_LABEL_DWN[] PROGMEM = "Dwn";
-const prog_uchar *ARP_ARP_LABELS[] PROGMEM = {
-  ARP_ARP_LABEL_UP, ARP_ARP_LABEL_DWN
+#define ARP_ARP_UP  0
+#define ARP_ARP_DWN 1
+const char ARP_ARP_LABELS[2][4] PROGMEM = {
+  {" Up"}, {"Dwn"}
 };
 
 //-----MIDI-----//            
@@ -162,22 +124,10 @@ uint16_t count_ppqn[NB_INSTS];
 
 #define DEFAULT_MIDI_VELO 100
 
-const prog_char MIDI_NOTE_LABEL_01[] PROGMEM   = "C%d";
-const prog_char MIDI_NOTE_LABEL_02[] PROGMEM   = "C%d#";
-const prog_char MIDI_NOTE_LABEL_03[] PROGMEM   = "D%d";
-const prog_char MIDI_NOTE_LABEL_04[] PROGMEM   = "D%d#";
-const prog_char MIDI_NOTE_LABEL_05[] PROGMEM   = "E%d";
-const prog_char MIDI_NOTE_LABEL_06[] PROGMEM   = "F%d";
-const prog_char MIDI_NOTE_LABEL_07[] PROGMEM   = "F%d#";
-const prog_char MIDI_NOTE_LABEL_08[] PROGMEM   = "G%d";
-const prog_char MIDI_NOTE_LABEL_09[] PROGMEM   = "G%d#";
-const prog_char MIDI_NOTE_LABEL_10[] PROGMEM   = "A%d";
-const prog_char MIDI_NOTE_LABEL_11[] PROGMEM   = "A%d#";
-const prog_char MIDI_NOTE_LABEL_12[] PROGMEM   = "B%d";
-
-const char *MIDI_NOTE_LABELS[] PROGMEM = {
-  MIDI_NOTE_LABEL_01, MIDI_NOTE_LABEL_02, MIDI_NOTE_LABEL_03, MIDI_NOTE_LABEL_04, MIDI_NOTE_LABEL_05, MIDI_NOTE_LABEL_06,
-  MIDI_NOTE_LABEL_07, MIDI_NOTE_LABEL_08, MIDI_NOTE_LABEL_09, MIDI_NOTE_LABEL_10, MIDI_NOTE_LABEL_11, MIDI_NOTE_LABEL_12
+const char MIDI_NOTE_LABELS[12][5] PROGMEM = {
+  {"C%d"},  {"C%d#"}, {"D%d"},  {"D%d#"}, 
+  {"E%d"},  {"F%d"},  {"F%d#"}, {"G%d"}, 
+  {"G%d#"}, {"A%d"},  {"A%d#"}, {"B%d"}
 };
 
 int8_t count_step[NB_INSTS];
@@ -225,67 +175,40 @@ uint16_t scale[NB_INSTS];
 #define LCD_MODE_PLAY_00 2
 #define NB_LCD_MODE_PLAY 3
 
-const prog_char LCD_CONFIG_LINE1[] PROGMEM = "MST BPM BUS      ";
-const prog_char LCD_CONFIG_LINE2[] PROGMEM = "%3s %3u %3s  ";
-
-const char *LCD_CONFIG_LINES[] PROGMEM = {
-  LCD_CONFIG_LINE1, LCD_CONFIG_LINE2
+const char LCD_CONFIG_LINES[2][18] PROGMEM = {
+  {"MST BPM BUS      "}, 
+  {"%3s %3u %3s  "}
 };
 
-const prog_char LCD_PLAY_LINE1_00[] PROGMEM = "%2u %2u %2u %2u %-4s";
-const prog_char LCD_PLAY_LINE2_00[] PROGMEM =     "%2u %2u %2u %2u ";
-
-// INST SCL TYPE ARP 
-//      STP  OCT RND
-const prog_char LCD_PLAY_LINE1_01[] PROGMEM = "%2u %3s %3s %3s  ";
-const prog_char LCD_PLAY_LINE2_01[] PROGMEM =     "Nt%u Oc%u %3s ";
-
-// INST RYT SWG SWG_RND
-//      CHN
-const prog_char LCD_PLAY_LINE1_02[] PROGMEM = "%2u %3s Sw%2u %3s ";
-const prog_char LCD_PLAY_LINE2_02[] PROGMEM = "        Ch%2u";
-
-
-const char *LCD_LINES_01[] PROGMEM = {
-  LCD_PLAY_LINE1_01, LCD_PLAY_LINE1_02, LCD_PLAY_LINE1_00
+const char LCD_LINES_01[3][21] PROGMEM = {
+  {"%2u %3s %3s %3s  "}, 
+  {"%2u %3s Sw%2u %3s "}, 
+  {"%2u %2u %2u %2u %-4s"}
 };
 
-const char *LCD_LINES_02[] PROGMEM = {
-  LCD_PLAY_LINE2_01, LCD_PLAY_LINE2_02, LCD_PLAY_LINE2_00
+const char LCD_LINES_02[3][17] PROGMEM = {
+  {"Nt%u Oc%u %3s "}, 
+  {"        Ch%2u"}, 
+  {"%2u %2u %2u %2u "}
 };
 
 byte lcd_mode = MODE_PLAY;
 byte lcd_mode_play = LCD_MODE_PLAY_00;
 
 // Buttons et LED
-#define BUTTON_BLACK_01    7
-#define BUTTON_BLACK_02    6
-#define BUTTON_BLACK_03    5
-#define BUTTON_BLACK_04    4
-#define BUTTON_RED         3
-#define BUTTON_BLACK       2
-#define BUTTON_WHITE_LEFT  1
-#define BUTTON_WHITE_RIGHT 0
+#define BUTTON_BLACK_01    0
+#define BUTTON_BLACK_02    1
+#define BUTTON_BLACK_03    2
+#define BUTTON_BLACK_04    3
+#define BUTTON_RED         4
+#define BUTTON_BLACK       5
+#define BUTTON_WHITE_LEFT  6
+#define BUTTON_WHITE_RIGHT 7
 
 byte buttons;
 
-#define LED_BLACK_01    BUTTON_BLACK_01
-#define LED_BLACK_02    BUTTON_BLACK_02
-#define LED_BLACK_03    BUTTON_BLACK_03
-#define LED_BLACK_04    BUTTON_BLACK_04
-#define LED_RED         BUTTON_RED
-#define LED_BLACK       BUTTON_BLACK
-#define LED_WHITE_LEFT  BUTTON_WHITE_LEFT
-#define LED_WHITE_RIGHT BUTTON_WHITE_RIGHT
-
-const byte LED[8] = {
-  LED_BLACK_01, LED_BLACK_02, LED_BLACK_03, LED_BLACK_04, LED_WHITE_RIGHT, LED_WHITE_LEFT
-};
-
-const prog_char LABEL_NO[]  PROGMEM = "NO";
-const prog_char LABEL_YES[] PROGMEM = "YES";
-const char *YESNO_LABELS[] PROGMEM = {
-  LABEL_NO, LABEL_YES
+const char YESNO_LABELS[2][4] PROGMEM = {
+  {" No"}, {"Yes"}
 };
 
 //--------------------------------------------SETUP----------------------------------------------//
@@ -297,14 +220,15 @@ void setup() {
   lcd.begin(16,2);
   byte *_buffer = (byte*) malloc(8);
   for(register byte _i = 0; _i < 4; _i++) {
-    memcpy_P(_buffer, (PGM_P) pgm_read_dword(&(BITMAP_CHARS[_i])), 8);
+    memcpy_P(_buffer, BITMAP_CHARS[_i], 8);
     lcd.createChar(_i, _buffer);
   }
   free(_buffer);
   lcd.clear();
-
-  Serial.begin((uint32_t) pgm_read_dword(&(SERIAL_MODE_VALUES[serial_mode])));
-
+  
+  // Serial init
+  Serial.begin(pgm_read_dword(&(SERIAL_MODE_VALUES[serial_mode])));
+  
   // Init Pot
   SmoozPot.Initialize();
 
@@ -312,10 +236,10 @@ void setup() {
   SR.Initialize();
   SR.Led_All_On();
 
-  step_chng = (byte*) malloc(NB_INSTS / 8);
-  noteOn    = (byte*) malloc(NB_INSTS / 8);
-  arp_rnd   = (byte*) malloc(NB_INSTS / 8);
-  swg_rnd   = (byte*) malloc(NB_INSTS / 8);
+  step_chng = (byte*) malloc(NB_INSTS >> 3); // x/8 == x>>3
+  noteOn    = (byte*) malloc(NB_INSTS >> 3);
+  arp_rnd   = (byte*) malloc(NB_INSTS >> 3);
+  swg_rnd   = (byte*) malloc(NB_INSTS >> 3);
 
   // Init default value
   for(register byte _inst = 0; _inst < NB_INSTS; _inst++) {
@@ -335,14 +259,14 @@ void setup() {
     acnt[_inst] = 0;
     aoff[_inst] = 0;
 
-    arp_scale[_inst] = MAJOR;
+    arp_scale[_inst] = OFF;
     arp_type[_inst]  = ARP_TYPE_FULL;
     arp_arp[_inst]   = ARP_ARP_UP;
     arp_step[_inst]  = 0;
     arp_oct[_inst]   = 1;
 
     rythm_mode [_inst] = RYTHM_MODE_POLY;
-    scale[_inst] = ppqn / 4;
+    scale[_inst] = ppqn >> 2; // x/4 == x >> 2
     swing[_inst] = 0;
     swing_final[_inst] = 0;
 
@@ -409,8 +333,8 @@ void checkButValues() {
       }
 
       if(bitRead(buttons, BUTTON_BLACK_03)) {
-        serial_mode = (serial_mode + 1) % 2;
-        Serial.begin((uint32_t) pgm_read_dword(&(SERIAL_MODE_VALUES[serial_mode])));
+        serial_mode = (serial_mode + 1) & 0xffff; // x&1 == x%2
+        Serial.begin(pgm_read_dword(&(SERIAL_MODE_VALUES[serial_mode])));
         return;
       }
     }
@@ -418,7 +342,7 @@ void checkButValues() {
     if(bitRead(buttons, BUTTON_RED)) {
       if(bitRead(state, MIDI_MASTER)) {
         state ^= 1 << PLAY_PATTERN;
-        SR.Led_Pin_Write(LED_RED, bitRead(state, PLAY_PATTERN));
+        SR.Led_Pin_Write(BUTTON_RED, bitRead(state, PLAY_PATTERN));
       }
       return;
     }
@@ -452,21 +376,21 @@ void checkButValues() {
     }
 
     if(mode == MODE_PLAY) {
-      for(register byte _button = BUTTON_BLACK_01; _button > BUTTON_BLACK_03; _button--) {
+      for(register byte _button = BUTTON_BLACK_01; _button < BUTTON_BLACK_03; _button++) {
         if(bitRead(buttons, _button)) {
           bitSet(lcd_state, LCD_PLAY_CHANGE);
           // leave mode bitmap
           bitClear(lcd_state, LCD_MODE_BITMAP);
-          SR.Led_Pin_Write(LED_BLACK, bitRead(lcd_state, LCD_MODE_BITMAP));
+          SR.Led_Pin_Write(BUTTON_BLACK, bitRead(lcd_state, LCD_MODE_BITMAP));
 
-          if((7 - _button) == lcd_mode_play) {
-            SR.Led_Pin_Write(_button, 0); // BUTTON = LED
+          if(_button == lcd_mode_play) {
+            SR.Led_Pin_Write(lcd_mode_play, 0); // BUTTON = LED
             lcd_mode_play = LCD_MODE_PLAY_00;
           } 
           else {
-            SR.Led_Pin_Write(_button, 0); // BUTTON = LED
-            SR.Led_Pin_Write(lcd_mode_play + 5, 1); // BUTTON = LED
-            lcd_mode_play = 7 - _button;
+            SR.Led_Pin_Write(lcd_mode_play, 0); // BUTTON = LED
+            lcd_mode_play =  _button;
+            SR.Led_Pin_Write(lcd_mode_play, 1); // BUTTON = LED
           }
           return;
         }   
@@ -475,10 +399,10 @@ void checkButValues() {
       if(bitRead(buttons, BUTTON_BLACK) && (!bitRead(buttons, BUTTON_WHITE_LEFT) || !bitRead(buttons, BUTTON_WHITE_RIGHT))) {
         lcd_state ^= 1 << LCD_MODE_BITMAP;
         bitSet(lcd_state, LCD_PLAY_CHANGE);
-        SR.Led_Pin_Write(LED_BLACK, bitRead(lcd_state, LCD_MODE_BITMAP));
+        SR.Led_Pin_Write(BUTTON_BLACK, bitRead(lcd_state, LCD_MODE_BITMAP));
 
         if(bitRead(lcd_state, LCD_MODE_BITMAP)) {
-          SR.Led_Pin_Write(7 - lcd_mode_play, 0); // BUTTON = LED
+          SR.Led_Pin_Write(lcd_mode_play, 0); // BUTTON = LED
           lcd_mode_play = LCD_MODE_PLAY_00;
         }
 
@@ -491,7 +415,7 @@ void checkButValues() {
 inline void switchOffLcdModeBitmap() {
   bitClear(lcd_state, LCD_MODE_BITMAP);
   bitSet(lcd_state, LCD_PLAY_CHANGE);
-  SR.Led_Pin_Write(LED_BLACK, 0);
+  SR.Led_Pin_Write(BUTTON_BLACK, 0);
 }
 
 void checkPotValues() {
@@ -551,7 +475,6 @@ void checkPotValues() {
         computeNote(inst);
         continue;
       }
-
     }
     else if(lcd_mode_play == LCD_MODE_PLAY_01) { 
       if (_pot == 0) {          
@@ -593,13 +516,10 @@ void checkPotValues() {
       if(_pot == 0) {
         if(checkValuePotChange(&rythm_mode[inst], _pot_value, 2)) {
           updateScale(inst);
-          continue;
         }
       }
       else if(_pot == 1) {
-        if(checkValuePotChange(&swing[inst], _pot_value, scale[inst] / 2)) {
-          continue;
-        }
+        checkValuePotChange(&swing[inst], _pot_value, scale[inst] / 2);
       }
       else if(_pot == 2) {
         if(_pot_value / 128 == 1) {
@@ -620,10 +540,13 @@ void checkPotValues() {
         }
       }
       else if(_pot == 7) {
-        if(checkValuePotChange(&midi_chnl[inst], _pot_value, 12)) {
-          continue;
-        }
+        checkValuePotChange(&midi_chnl[inst], _pot_value, 12);
       } 
+    }
+    
+    // Return on first pot change
+    if(bitRead(state, POT_CHANGE)) {
+      return;
     }
   }
 } 
@@ -673,7 +596,7 @@ void updateLcd() {
         // Draw all steps
         byte _pulse_step = 0;
         for(register byte _step = 0; _step <  stps[inst]; _step++) {
-          lcd.setCursor(_step % 16, _step / 16);
+          lcd.setCursor(_step & 15, _step >> 4); // x%16 == x&15 i>>4 == i / 16
 
           if(BIT_CHK(beat_holder[inst], _step)) {
             lcd.write(byte(getActiveStepChar(_pulse_step)));
@@ -689,7 +612,7 @@ void updateLcd() {
       if((bitRead(state, PLAY_PATTERN) && bitRead(lcd_state, LCD_DRAW_BITMAP) && BIT_CHK(step_chng, inst))) {
         bitClear(lcd_state, LCD_DRAW_BITMAP);
         // current step
-        lcd.setCursor(count_step[inst] % 16, count_step[inst] / 16);
+        lcd.setCursor(count_step[inst] & 15, count_step[inst] >> 4);
         lcd.write(char(219));
 
         // redraw last step
@@ -699,7 +622,7 @@ void updateLcd() {
           _last_puls = (puls[inst] + _last_puls - 1) % puls[inst];
         }
         byte _active_char;
-        lcd.setCursor(_last_step % 16, _last_step / 16);
+        lcd.setCursor(_last_step & 15, _last_step >> 4);
         if(BIT_CHK(beat_holder[inst], _last_step)) {
           _active_char = byte(getActiveStepChar(_last_puls));
           lcd.write(_active_char);
@@ -724,15 +647,13 @@ void updateLcd() {
       if(lcd_mode_play == LCD_MODE_PLAY_00) {
         // LINE 01
         char _midi_note[4];
-        sprintf_P(_midi_note,
-        (PGM_P) pgm_read_word(&(MIDI_NOTE_LABELS[midi_note[inst] % 12])),
-        midi_note[inst] / 12);
+        sprintf_P(_midi_note, MIDI_NOTE_LABELS [midi_note[inst] % 12], midi_note[inst] / 12);
 
-        sprintf_P(_line1, (PGM_P) pgm_read_word(&(LCD_LINES_01[LCD_MODE_PLAY_00])), 
-        inst + 1, stps[inst], puls[inst], offs[inst], _midi_note);
-
+        sprintf_P(_line1, LCD_LINES_01[LCD_MODE_PLAY_00], 
+          inst + 1, stps[inst], puls[inst], offs[inst], _midi_note);
+        
         // LINE 02 
-        sprintf_P(_line2, (PGM_P) pgm_read_word(&(LCD_LINES_02[LCD_MODE_PLAY_00])), 
+        sprintf_P(_line2, LCD_LINES_02[LCD_MODE_PLAY_00], 
         roll[inst], roff[inst], acnt[inst], aoff[inst]);
       }
       // INST SCL TYPE ARP 
@@ -740,19 +661,19 @@ void updateLcd() {
       else if(lcd_mode_play == LCD_MODE_PLAY_01) {
         // LINE 01
         char _arp_scale[4], _arp_type[4], _arp_arp[4];
-        strcpy_P(_arp_scale, (PGM_P) pgm_read_word(&(ARP_SCALE_LABELS[arp_scale[inst]])));
-        strcpy_P(_arp_type,  (PGM_P) pgm_read_word(&(ARP_TYPE_LABELS[arp_type[inst]])));
-        strcpy_P(_arp_arp,   (PGM_P) pgm_read_word(&(ARP_ARP_LABELS[arp_arp[inst]])));
+        strcpy_P(_arp_scale, ARP_SCALE_LABELS[arp_scale[inst]]);
+        strcpy_P(_arp_type,  ARP_TYPE_LABELS[arp_type[inst]]);
+        strcpy_P(_arp_arp,   ARP_ARP_LABELS[arp_arp[inst]]);
 
-        sprintf_P(_line1, (PGM_P) pgm_read_word(&(LCD_LINES_01[LCD_MODE_PLAY_01])),
-        inst + 1, _arp_scale, _arp_type, _arp_arp);
+        sprintf_P(_line1, LCD_LINES_01[LCD_MODE_PLAY_01],
+          inst + 1, _arp_scale, _arp_type, _arp_arp);
 
         // LINE 02
         char _yesno[4];
         byte _arp_rnd = BIT_CHK(arp_rnd, inst);
-        strcpy_P(_yesno, (PGM_P) pgm_read_word(&(YESNO_LABELS[_arp_rnd])));
-        sprintf_P(_line2, (PGM_P) pgm_read_word(&(LCD_LINES_02[LCD_MODE_PLAY_01])),
-        arp_step[inst], arp_oct[inst], _yesno);
+        strcpy_P(_yesno,  YESNO_LABELS[_arp_rnd]);
+        sprintf_P(_line2, LCD_LINES_02[LCD_MODE_PLAY_01],
+          arp_step[inst], arp_oct[inst], _yesno);
       }
       // INST SWG RYT SRND 
       //      CHN
@@ -760,15 +681,15 @@ void updateLcd() {
         // LINE 01
         char _rythm_mode[3], _yesno[4];
         byte _swing_rnd = BIT_CHK(swg_rnd, inst);
-        strcpy_P(_rythm_mode, (PGM_P) pgm_read_word(&(RYTHM_MODE_LABELS[rythm_mode[inst]])));
-        strcpy_P(_yesno, (PGM_P) pgm_read_word(&(YESNO_LABELS[_swing_rnd]))); 
+        strcpy_P(_rythm_mode, RYTHM_MODE_LABELS[rythm_mode[inst]]);
+        strcpy_P(_yesno,      YESNO_LABELS[_swing_rnd]); 
 
-        sprintf_P(_line1, (PGM_P) pgm_read_word(&(LCD_LINES_01[LCD_MODE_PLAY_02])),
-        inst + 1, _rythm_mode, swing[inst], _yesno);
+        sprintf_P(_line1, LCD_LINES_01[LCD_MODE_PLAY_02],
+          inst + 1, _rythm_mode, swing[inst], _yesno);
 
         // LINE 02
-        sprintf_P(_line2, (PGM_P) pgm_read_word(&(LCD_LINES_02[LCD_MODE_PLAY_02])),
-        midi_chnl[inst]);
+        sprintf_P(_line2, LCD_LINES_02[LCD_MODE_PLAY_02],
+          midi_chnl[inst]);
 
       }
 
@@ -783,8 +704,7 @@ void updateLcd() {
     // Print Current Step
     if(BIT_CHK(step_chng, inst) || bitRead(lcd_state, LCD_MODE_CHANGE) || bitRead(lcd_state, LCD_PLAY_CHANGE) || bitRead(state, POT_CHANGE)) {
       lcd.setCursor(0, 1);
-      char _step[2] = {
-        '\0'                                                };
+      char _step[3];
       sprintf_P(_step, PSTR("%2u"), count_step[inst] + 1);
       lcd.print(_step);
 
@@ -803,20 +723,19 @@ void updateLcd() {
 
   if(lcd_mode == MODE_CONFIG_1) {
     if(bitRead(lcd_state, LCD_MODE_CHANGE) || bitRead(state, BUTTON_PRESS)) {
-      char _line_buf[16] = {
-        '\0'                                                };  
+      char _line_buf[18];  
 
-      strcpy_P(_line_buf, (PGM_P) pgm_read_word(&(LCD_CONFIG_LINES[0])));
+      strcpy_P(_line_buf, LCD_CONFIG_LINES[0]);
       lcd.clear();
       lcd.setCursor(0,0);
       lcd.print(_line_buf);
 
-      char* _format = (char*) pgm_read_word(&(LCD_CONFIG_LINES[1]));
       char _ser[4], _yesno[4];
       byte _master = bitRead(state, MIDI_MASTER);
-      strcpy_P(_yesno, (PGM_P) pgm_read_word(&(YESNO_LABELS[_master])));
-      strcpy_P(_ser, (PGM_P) pgm_read_word(&(SERIAL_MODE_LABELS[serial_mode])));
-      sprintf_P(_line_buf, _format, _yesno, bpm, _ser);
+      strcpy_P(_yesno, YESNO_LABELS[_master]);
+      strcpy_P(_ser,   SERIAL_MODE_LABELS[serial_mode]);
+      
+      sprintf_P(_line_buf, LCD_CONFIG_LINES[1], _yesno, bpm, _ser);
 
       lcd.setCursor(0,1);
       lcd.print(_line_buf);
@@ -847,15 +766,18 @@ void resetAlltrack() {
     if(BIT_CHK(noteOn, _inst)) {
       Send_NoteOFF(_inst);
     }
+    
     count_ppqn[_inst] = 0;
     count_step[_inst] = 0;
     count_puls[_inst] = 0;
+    
     if(puls[_inst] > 0 && BIT_CHK(beat_holder[_inst], 0)) {
       computeNote(_inst);
     }
+    
     // Init all step_chng
-    if(_inst % 8 == 0) {
-      step_chng[_inst / 8] = B00000000;
+    if((_inst & 7) == 0) {
+      step_chng[(_inst >> 3)] = B00000000;
     }
   }
 }
@@ -864,7 +786,7 @@ void updateMidi() {
   if(bitRead(state, BUTTON_PRESS) && bitRead(buttons, BUTTON_RED)) {
     if(bitRead(state, PLAY_PATTERN)) {
       Serial.write(MIDI_START);
-      for(register byte  _bank = 0; _bank < NB_INSTS / 8; _bank++) {
+      for(register byte  _bank = 0; _bank < (NB_INSTS >> 3); _bank++) {
         step_chng[_bank] = B11111111;
       }
       bitSet(state, UPDATED_PPQN);
@@ -896,15 +818,15 @@ void updateMidi() {
 }
 
 inline void Send_NoteON(const byte _inst) {
-  last_midi_note[_inst] = next_midi_note[_inst];
-
   Serial.write(144 + midi_chnl[_inst] - 1);//Note ON on selected channel
-  Serial.write(last_midi_note[_inst]);
+  Serial.write(next_midi_note[_inst]);
   Serial.write(next_midi_velo[_inst]);
 
+  last_midi_note[_inst] = next_midi_note[_inst];
+  
   // Turn on inst led
   if(_inst == inst) {
-    SR.Led_Pin_Write(LED[((count_puls[_inst] + 1) % 2) + 4], 1);
+    SR.Led_Pin_Write((count_puls[_inst] & 1) + 6, 1);
   }
 
   // Note On
@@ -912,13 +834,13 @@ inline void Send_NoteON(const byte _inst) {
 }
 
 inline void Send_NoteOFF(const byte _inst) {
-  Serial.write (128 + midi_chnl[_inst] - 1);//Note OFF on selected channel
+  Serial.write(128 + midi_chnl[_inst] - 1);//Note OFF on selected channel
   Serial.write(last_midi_note[_inst]);
-  Serial.write (0x01);//velocite 0
+  Serial.write(0x01);//velocite 0
 
   // Turn off inst led
   if(_inst == inst) {
-    SR.Led_Pin_Write(LED[((count_puls[_inst] + 1) % 2) + 4], 0);
+    SR.Led_Pin_Write((count_puls[_inst] & 1) + 6, 0);
   }
 
   // Note Off
@@ -932,13 +854,14 @@ void Count_PPQN() {
   //-----------------Sync MASTER-------------------//  
   if(bitRead(state, MIDI_MASTER)) {
     updateTimerTime();
+    
     // Send Midi Clock on 24 PPQN
     total_timer_time += timer_time;
-    //if((total_timer_time >= (2500000 / bpm) - 16) { // MIDI Clock on 24 ppqn
     if((total_timer_time * bpm) >= 2500000) { // MIDI Clock on 24 ppqn
       Serial.write(MIDI_CLOCK);
       total_timer_time = 0;
     }
+    
     if(bitRead(state, PLAY_PATTERN)) {
       update_all_count_ppqn();
     }
@@ -984,7 +907,7 @@ void update_all_count_ppqn() {
       // Delay the second 16th note within each 8th note.
       // ie. delay all the even-numbered 16th notes within the beat (2, 4, 6, 8, etc.)
       if(swing[_inst] != 0 
-        && (((_current_step + 1) % 4) == 0)) {
+        && (((_current_step + 1) & 3) == 0)) {
         _current_step = (count_ppqn[_inst] - swing_final[_inst]) / scale[_inst];
       }
 
@@ -994,7 +917,7 @@ void update_all_count_ppqn() {
         bitSet(lcd_state, LCD_DRAW_BITMAP);
 
         (swing[_inst] != 0 && BIT_CHK(swg_rnd, _inst))
-          ? swing_final[inst] = swing[_inst] - random(0, swing[_inst])
+          ? swing_final[inst] = swing[_inst] - random(0, (swing[_inst] >> 1))
           : swing_final[_inst] = swing[_inst];
         
         count_step[_inst] = _current_step % stps[_inst];
@@ -1006,13 +929,15 @@ void update_all_count_ppqn() {
         BIT_CLR(step_chng, _inst);
 
         // Half step
-        if((count_ppqn[_inst] % scale[_inst]) == (scale[_inst] / 2)) {
+        if((count_ppqn[_inst] % scale[_inst]) == (scale[_inst] >> 1)) {
           // Apply roll on old active step
-          byte _last_puls = (puls[_inst] + count_puls[_inst] - 1) % puls[_inst];
-          if(roll_holder[_inst] != NULL && BIT_CHK(noteOn, _inst) && BIT_CHK(roll_holder[_inst], _last_puls)) {
-            // Replay step  
-            BIT_SET(step_chng, _inst);
-            count_puls[_inst] = _last_puls;
+          if(roll_holder[_inst] != NULL && BIT_CHK(noteOn, _inst)) {
+            byte _last_puls = (puls[_inst] + count_puls[_inst] - 1) % puls[_inst];
+            if(BIT_CHK(roll_holder[_inst], _last_puls)) {
+              // Replay step  
+              BIT_SET(step_chng, _inst);
+              count_puls[_inst] = _last_puls;
+            }
           }
         }
       }
@@ -1031,14 +956,14 @@ void computeNote(const byte _inst) {
       // SCALE
       int8_t _scale_mod = 0;
       byte* _scale_mods = (byte*) malloc(arp_step[_inst]);
-      memcpy_P(_scale_mods, (PGM_P) pgm_read_dword(&(ARP_SCALES[arp_scale[_inst]])), arp_step[_inst]);
+      memcpy_P(_scale_mods, ARP_SCALES[arp_scale[_inst]], arp_step[_inst]);
 
       int8_t _arp_puls, _arp_oct;
       // RANDOM
       if(BIT_CHK(arp_rnd, _inst)) {
         _arp_puls = random(0, 7) % arp_step[_inst];
-        // FULL STRAIGHT
       } 
+      // FULL STRAIGHT
       else if(arp_type[_inst] == ARP_ARP_UP) {
         _arp_puls = count_puls[_inst] % arp_step[_inst];
       }
@@ -1051,7 +976,7 @@ void computeNote(const byte _inst) {
           // 0, 1, 2, 3, 4, 5, 6, 0, 1, 2...
           _scale_mod = _scale_mods[_arp_puls] + _arp_oct;
         } 
-        else if (arp_arp[_inst] == ARP_ARP_DOWN) {
+        else if (arp_arp[_inst] == ARP_ARP_DWN) {
           // 0, 6, 5, 4, 3, 2, 1, 0, 6, 5, ...
           _arp_puls   = (14 - (_arp_puls)) % 7;
           _scale_mod -= _scale_mods[_arp_puls] + _arp_oct;
@@ -1063,12 +988,12 @@ void computeNote(const byte _inst) {
 
         if(arp_arp[_inst] == ARP_ARP_UP) {
           // 0, 2, 4, 6, 0, 2, 4...
-          _arp_puls = 2 * (_arp_puls % 4);
+          _arp_puls = 2 * (_arp_puls & 3);
           _scale_mod = _scale_mods[_arp_puls] + _arp_oct;
         } 
-        else if (arp_arp[_inst] == ARP_ARP_DOWN) {
+        else if (arp_arp[_inst] == ARP_ARP_DWN) {
           // 0, 6, 4, 2, 0, 6, 4...
-          _arp_puls   = (16 - (2 * (_arp_puls % 4))) % 8;
+          _arp_puls   = (16 - (2 * (_arp_puls & 3))) & 7;
           _scale_mod -= _scale_mods[_arp_puls] + _arp_oct;
         }
       } 
@@ -1095,7 +1020,7 @@ void euclid(const byte _step, const byte _pulse, const byte _offs, byte* *_tab) 
   // Init tab
   free(*_tab);
   if(_step > 0) {
-    *_tab = (byte*) malloc((_step / 8) + 1);
+    *_tab = (byte*) malloc(_step >> 3);
     for(register byte _i = 0; _i < _step; _i++) {
       BIT_CLR((*_tab), _i);
     }
