@@ -1,6 +1,6 @@
 /*
  * Author:       Laurent Granié
- * Copyright:    (C) 2015 Laurent Granié
+ * Copyright:    (C) 2016 Laurent Granié
  * Licence:      GNU General Public Licence version 3
  */
 #include <avr/pgmspace.h>
@@ -12,7 +12,7 @@
 #include <LiquidCrystal.h>
 
 /* a=target variable, b=bit number to act upon 0-n */
-#define _SET(a,b) (a[(b>>3)] |= 1 << (b&7))  // b/8 == i>>3, b%8 == b&7
+#define _SET(a,b) (a[(b>>3)] |= 1 << (b&7))  // b/8 == b>>3, b%8 == b&7
 #define _CLR(a,b) (a[(b>>3)] &= ~(1 << (b&7)))
 #define _FLP(a,b) (a[(b>>3)] ^= 1 << (b&7))
 #define _CHK(a,b) (a[(b>>3)] & (1 << (b&7)))
@@ -89,7 +89,7 @@ uint32_t total_timer_time = 0;
 #define MIDI_STOP  0xfc
 #define MIDI_CLOCK 0xf8
 
-#define DEFAULT_MIDI_VELO 100
+#define DEFAULT_MIDI_VELO 80
 
 typedef struct {
   uint8_t offs = 0;
@@ -118,6 +118,7 @@ typedef struct {
   uint8_t puls = 0;
   
   uint8_t rythm_mode = RYTHM_MODE_POLY;
+  uint8_t time_sign  = 2;
   uint8_t swing = 0;
   
   uint8_t note = 33;
@@ -172,8 +173,8 @@ const char LCD_LINES_01[3][22] PROGMEM = {
 const char LCD_LINES_02[3][18] PROGMEM = {
 //  RL  OF  AT  OF
   {"%2u %2u %2u %2u  "}, 
-// 
-  {"             "},
+//      TS
+  {"1/%2d          "},
 //  OCT TYP
   {"%2u %3s       "}
 };
@@ -254,7 +255,8 @@ void setup() {
     pminsts[_i].puls = 0;
   
     pminsts[_i].rythm_mode = RYTHM_MODE_POLY;
-  
+    pminsts[_i].time_sign = 2;
+    
     pminsts[_i].swing = 0;
   
     pminsts[_i].note = 33;
@@ -534,7 +536,12 @@ void checkPotValues() {
         }
         else if(_pot == 3) {
           checkValuePotChange(&(_pminst->chnl), _pot_value, 12);
-        } 
+        }
+        else if(_pot == 4) {
+          if(checkValuePotChange(&(_pminst->time_sign), _pot_value, 4)) {
+            updateScale(inst_index);
+          }
+        }
       }
       // Ist Tn Of Al Af
       //     |_|_||_|_|_|
@@ -680,6 +687,7 @@ void updateLcd() {
       }
       
       // INST RYT SWG    CHN
+      //      1/TS
       else if(lcd_mode_play == LCD_01) {
         // LINE 01
         char _rythm_mode[3];
@@ -689,7 +697,8 @@ void updateLcd() {
           inst_index + 1, _rythm_mode, _pminst->swing, _pminst->chnl);
 
         // LINE 02
-        strcpy_P(_line2, LCD_LINES_02[lcd_mode_play]);
+        sprintf_P(_line2, LCD_LINES_02[lcd_mode_play],
+          (1 << _pminst->time_sign) * 4);
       }
       
       // INST TON MOD ALT AOF 
@@ -875,7 +884,7 @@ inline void updateScale(const uint8_t _inst) {
   MTRACK  *_minst  = &(minsts[_inst]);
   ((_pminst->rythm_mode == RYTHM_MODE_SOLO) && (_pminst->stps != 0)) 
     ? _minst->scale = (ppqn * 8) / _pminst->stps // 96 = 24 ppqn x 4 noires = nb ppqm / bar
-    : _minst->scale  = ppqn / 4;
+    : _minst->scale  = ppqn / (1 << _pminst->time_sign); // 2 ^ time_sign = 1/4, 1/8, 1/16, 1/32, 1/64
 }
 
 //////////////////////////////////////////////////////////////////
